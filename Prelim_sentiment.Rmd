@@ -1,0 +1,391 @@
+---
+title: "Prelim text sentiment analysis"
+output: html_notebook
+---
+
+```{r Github}
+# usethis::create_from_github("https://github.com/Sfglatt/Suicide_text.git",
+#                            destdir = "Github/Suicide_text")
+```
+
+```{r Packages}
+if (!require("dplyr")) {install.packages("dplyr"); require("dplyr")}
+if (!require("igraph")) {install.packages("igraph"); require("igraph")}
+if (!require("ggraph")) {install.packages("ggraph"); require("ggraph")}
+if (!require("ggplot2")) {install.packages("ggplot2"); require("ggplot2")}
+if (!require("Matrix")) {install.packages("Matrix"); require("Matrix")}
+if (!require("officer")) {install.packages("officer"); require("officer")}
+if (!require("textdata")) {install.packages("textdata"); require("textdata")}
+if (!require("tidyverse")) {install.packages("tidyverse"); require("tidyverse")}
+if (!require("tidytext")) {install.packages("tidytext"); require("tidytext")}
+if (!require("tm")) {install.packages("tm"); require("tm")}
+if (!require("topicmodels")) {install.packages("topicmodels"); require("topicmodels")}
+if (!require("readr")) {install.packages("readr"); require("readr")}
+if (!require("reshape2")) {install.packages("reshape2"); require("reshape2")}
+if (!require("widyr")) {install.packages("widyr"); require("widyr")}
+if (!require("wordcloud")) {install.packages("wordcloud"); require("wordcloud")}
+```
+
+```{r Functions}
+# Bigram visualization function
+# More about this in the bigram chunk
+count_bigrams <- function(dataset) {
+  dataset %>%
+    unnest_tokens(bigram, text, token = "ngrams", n = 2) %>%
+    separate(bigram, c("word1", "word2"), sep = " ") %>%
+    filter(!word1 %in% stop_words$word,
+           !word2 %in% stop_words$word) %>%
+    count(word1, word2, sort = TRUE)
+}
+
+visualize_bigrams <- function(bigrams) {
+  set.seed(123456)
+  a <- grid::arrow(type = "closed", length = unit(.15, "inches"))
+  
+  bigrams %>%
+    graph_from_data_frame() %>%
+    ggraph(layout = "fr") +
+    geom_edge_link(aes(edge_alpha = n), show.legend = FALSE, arrow = a) +
+    geom_node_point(color = "lightblue", size = 5) +
+    geom_node_text(aes(label = name), vjust = 1, hjust = 1) +
+    theme_void()
+}
+```
+
+```{r Set up}
+# set the participant ID name and file path for all forthcoming files per participant
+id_name = "P57" 
+
+file_path <- file.path("Data", id_name)
+dir.create(file_path)
+```
+
+```{r Data}
+# Import transcript
+Transcript_doc <- read_docx("P57_Transcript.docx")
+
+# Extract text 
+text_data <- docx_summary(Transcript_doc) %>%
+  filter(content_type == "paragraph") %>%
+  pull(text) %>%
+  paste(collapse = " ")
+
+
+# Convert to dataframe
+text_df <- data.frame(text = text_data, stringsAsFactors = FALSE)
+
+# Unnest tokens
+tidy_text <- text_df %>%
+  unnest_tokens(word, text)
+
+# Look
+print(head(tidy_text))
+
+# Save as CSV 
+
+# Save data in CSV form
+# This will automatically append the right participant ID (above) and date
+filetype <- ".csv"
+name <- paste0(id_name, "_Transcript_raw_")
+filename <- paste(name, Sys.Date(), filetype, sep = '')
+full_filename <- file.path(file_path, filename)
+write.csv(tidy_text, file = full_filename, row.names = FALSE)
+```
+
+```{r Clean}
+# remove stop words 
+data(stop_words)
+
+tidy_text <- tidy_text %>%
+  anti_join(stop_words)
+
+# Most common words
+tidy_text %>%
+  count(word, sort = TRUE)
+# Visualize ^
+tidy_text %>%
+  count(word, sort = TRUE) %>%
+  filter(n > 5) %>%
+  # Set filter to whatever limit you want. Since this is only one participant's transcipt, I'm choosing 5.
+  mutate(word = reorder(word, n)) %>%
+  ggplot(aes(n, word)) +
+  geom_col() +
+  labs(y = NULL)
+```
+
+```{r Sentiment}
+# Look at sentiment descriptives 
+
+tidytext::get_sentiments("afinn") # 1
+AFINN <- get_sentiments("afinn")
+
+tidytext::get_sentiments("bing") 
+
+get_sentiments("bing") %>% 
+  count(sentiment)
+
+tidytext::get_sentiments("nrc")   # 1
+
+get_sentiments("nrc") %>% 
+  filter(sentiment %in% c("positive", "negative")) %>% 
+  count(sentiment)
+
+# Example - look at positive words in this participants transcript
+nrc_positive <- get_sentiments("nrc") %>% 
+  filter(sentiment == "positive")
+
+tidy_text %>%
+  inner_join(nrc_positive) %>%
+  count(word, sort = TRUE)
+# Love, hope, daughter
+
+# Now look at negative
+nrc_negative <- get_sentiments("nrc") %>% 
+  filter(sentiment == "negative")
+
+tidy_text %>%
+  inner_join(nrc_negative) %>%
+  count(word, sort = TRUE)
+# far less instances
+
+# Make dataframes with raw text word, the sentiment, and N
+
+# NRC
+(nrc_word_counts <- tidy_text %>%
+  inner_join(get_sentiments("nrc")) %>%
+  count(word, sentiment, sort = TRUE) %>%
+  ungroup())
+# Visualize ^
+(nrc_plot <- nrc_word_counts %>%
+  group_by(sentiment) %>%
+  slice_max(n, n = 10) %>% 
+  ungroup() %>%
+  mutate(word = reorder(word, n)) %>%
+  ggplot(aes(n, word, fill = sentiment)) +
+  geom_col(show.legend = FALSE) +
+  facet_wrap(~sentiment, scales = "free_y") +
+  labs(x = "Contribution to sentiment",
+       y = NULL))
+
+# bing
+(bing_word_counts <- tidy_text %>%
+  inner_join(get_sentiments("bing")) %>%
+  count(word, sentiment, sort = TRUE) %>%
+  ungroup())
+# Visualize ^
+(bing_plot <- bing_word_counts %>%
+  group_by(sentiment) %>%
+  slice_max(n, n = 10) %>% 
+  ungroup() %>%
+  mutate(word = reorder(word, n)) %>%
+  ggplot(aes(n, word, fill = sentiment)) +
+  geom_col(show.legend = FALSE) +
+  facet_wrap(~sentiment, scales = "free_y") +
+  labs(x = "Contribution to sentiment",
+       y = NULL))
+
+# Save the descriptive sentiment visualization
+# This will automatically append the right participant ID (set above) and save to that ID's folder
+dir.create(file.path("Data", id_name), showWarnings = FALSE, recursive = TRUE)
+file_path_nrc <- file.path("Data", id_name, paste0(id_name, "_sentiment_fig_nrc.png"))
+file_path_bing <- file.path("Data", id_name, paste0(id_name, "_sentiment_fig_bing.png"))
+ggsave(nrc_plot, filename = file_path_nrc)
+ggsave(bing_plot, filename = file_path_bing)
+```
+
+```{r Word cloud}
+# Basic
+tidy_text %>%
+  anti_join(stop_words) %>%
+  count(word) %>%
+  with(wordcloud(word, n, max.words = 100))
+
+# Split by positive and negative
+tidy_text %>%
+  inner_join(get_sentiments("bing")) %>%
+  count(word, sentiment, sort = TRUE) %>%
+  acast(word ~ sentiment, value.var = "n", fill = 0) %>%
+  comparison.cloud(colors = c("#666666", "#009999"),
+                   max.words = 100)
+
+file_path_bing <- file.path("Data", id_name, paste0(id_name, "_wordcloud_bing.png"))
+png(filename = file_path_bing, width = 800, height = 600)
+tidy_text %>%
+  inner_join(get_sentiments("bing")) %>%
+  count(word, sentiment, sort = TRUE) %>%
+  acast(word ~ sentiment, value.var = "n", fill = 0) %>%
+  comparison.cloud(colors = c("#666666", "#009999"),
+                   max.words = 100)
+dev.off()
+```
+
+```{r Sentences}
+# Tokenize into sentences
+text_sentences <- tibble(text = text_data) %>% 
+  unnest_tokens(sentence, text, token = "sentences")
+
+# Save sentnces in CSV form
+# This will automatically append the right participant ID (above) and date
+filetype <- ".csv"
+name <- paste0(id_name, "_Transcript_sentences_")
+filename <- paste(name, Sys.Date(), filetype, sep = '')
+full_filename <- file.path(file_path, filename)
+write.csv(text_sentences, file = full_filename, row.names = FALSE)
+```
+
+```{r Bigrams and trigrams}
+# tokenize into consecutive sequences of words, called n-grams (how often word B follows word A)
+
+(text_data_bigrams <- text_df %>%
+  unnest_tokens(bigram, text, token = "ngrams", n = 2) %>%
+  # when n = 2 } looking at pairs of 2 consecutive words (called 'bigrams')
+  # when n = 3 } looking at pairs of 3 consecutive words (called 'trigrams')
+  # etc.
+  filter(!is.na(bigram))) 
+
+# Most common bigrams
+text_data_bigrams %>%
+  count(bigram, sort = TRUE)
+
+# There are a lot of filler / stop words . We can filter this out: 
+bigrams_separated <- text_data_bigrams %>%
+  separate(bigram, c("word1", "word2"), sep = " ")
+
+bigrams_filtered <- bigrams_separated %>%
+  filter(!word1 %in% stop_words$word) %>%
+  filter(!word2 %in% stop_words$word)
+
+# new bigram counts:
+(bigram_counts <- bigrams_filtered %>% 
+  count(word1, word2, sort = TRUE))
+# "successful"-"teacher"; "daughter"-"leaving"
+
+(bigrams_united <- bigrams_filtered %>%
+  unite(bigram, word1, word2, sep = " "))
+
+# trigrams
+# removing stop words
+(text_data_trigrams <- text_df %>%
+  unnest_tokens(trigram, text, token = "ngrams", n = 3) %>%
+  filter(!is.na(trigram)) %>%
+  separate(trigram, c("word1", "word2", "word3"), sep = " ") %>%
+  filter(!word1 %in% stop_words$word,
+         !word2 %in% stop_words$word,
+         !word3 %in% stop_words$word) %>%
+  count(word1, word2, word3, sort = TRUE))
+# "beliefs"-"radically"-"changing", etc.
+
+# If you want to see all the words that come before another word (e.g., what words commonly appear before / after "change"?)
+bigrams_filtered %>%
+  filter(word2 == "change") %>%
+  count(word1, sort = TRUE)
+# biggest, drastically, etc.
+
+bigrams_separated %>%
+  filter(word1 == "change") %>%
+  count(word1, word2, sort = TRUE)
+
+# Look at the most frequent words that were preceded by another word (e.g., “not”) and were associated with a sentiment.
+# This is important because while a positive word is given a positive score, if it is preceded by a negating word like not, it's not used in a positive way
+(not_words <- bigrams_separated %>%
+  filter(word1 == "not") %>%
+  inner_join(AFINN, by = c(word2 = "word")) %>%
+  count(word2, value, sort = TRUE))
+# easy, which has a positive score (Value) of 1, was said as "not easy"
+
+# Visualize the words that contributed the most in the “wrong” direction. 
+# Multiply their value by the number of times they appear (so that a word with a value of +3 occurring 10 times has as much impact as a word with a sentiment value of +1 occurring 30 times). 
+# [In this case it's only one instance, so the figure isn't necessary]
+not_words %>%
+  mutate(contribution = n * value) %>%
+  arrange(desc(abs(contribution))) %>%
+  head(20) %>%
+  mutate(word2 = reorder(word2, contribution)) %>%
+  ggplot(aes(n * value, word2, fill = n * value > 0)) +
+  geom_col(show.legend = FALSE) +
+  labs(x = "Sentiment value * number of occurrences",
+       y = "Words preceded by \"not\"")
+
+# Do this with other negating words, like "no"
+negation_words <- c("not", "no", "never", "without")
+
+negated_words <- bigrams_separated %>%
+  filter(word1 %in% negation_words) %>%
+  inner_join(AFINN, by = c(word2 = "word")) %>%
+  count(word1, word2, value, sort = TRUE)
+
+negated_words %>%
+  mutate(contribution = n * value) %>%
+  arrange(desc(abs(contribution))) %>%
+  head(20) %>%
+  mutate(word2 = reorder(word2, contribution)) %>%
+  ggplot(aes(n * value, word2, fill = n * value > 0)) +
+  geom_col(show.legend = FALSE) +
+  labs(x = "Sentiment value * number of occurrences",
+       y = "Words preceded by \"negation\"")
+
+# Visualize bigram
+# first, filter for common combinations. Since this is only one participant, I'm doing n > 0.
+(bigram_graph <- bigram_counts %>%
+  filter(n > 0) %>%
+  graph_from_data_frame())
+
+set.seed(123456)
+a <- grid::arrow(type = "closed", length = unit(.15, "inches"))
+
+ggraph(bigram_graph, layout = "fr") +
+  geom_edge_link(aes(edge_alpha = n), show.legend = FALSE,
+                 arrow = a, end_cap = circle(.07, 'inches')) +
+  geom_node_point(color = "lightblue", size = 5) +
+  geom_node_text(aes(label = name), vjust = 1, hjust = 1) +
+  theme_void()
+
+# To do all of cleaning --> visualization that is done step-by-step in one, use the functions from the functions chunk:
+text_bigrams <- text_df %>%
+  count_bigrams()
+
+text_bigrams %>%
+  filter(n > 0,
+         !str_detect(word1, "\\d"),
+         !str_detect(word2, "\\d")) %>%
+  visualize_bigrams()
+```
+
+```{r Change format}
+# Change into document-term matrix format
+(Transcript_dtm <- tidy_text %>%
+  count(document = 1, word) %>%
+  cast_dtm(document, word, n))
+```
+
+```{r Topic modeling}
+# PSA: Divide text into natural groups to understand them separately. Topic modeling is a method for unsupervised classification, similar to clustering on numeric data, which finds natural groups of items 
+# Latent Dirichlet allocation (LDA) is a way of doing ^^.
+
+(Transcript_lda <- LDA(Transcript_dtm, 
+                       k = 4,
+                       # The number of 'topics' you want to model
+                       control = list(seed = 123456)))
+(LDA_topics <- tidy(Transcript_lda, matrix = "beta"))
+
+top_terms <- LDA_topics %>%
+  group_by(topic) %>%
+  slice_max(beta, n = 10) %>% 
+  ungroup() %>%
+  arrange(topic, -beta)
+
+top_terms %>%
+  mutate(term = reorder_within(term, beta, topic)) %>%
+  ggplot(aes(beta, term, fill = factor(topic))) +
+  geom_col(show.legend = FALSE) +
+  facet_wrap(~ topic, scales = "free") +
+  scale_y_reordered()
+# look at the terms in each topic (cluser 1/2). The terms are allowed to overlap. This is a good thing - an advantage of topic modeling (vs “hard clustering” methods) - since topics used in natural language  have  overlap in terms of words
+
+# Look at the words with the *greatest difference between topics*
+(beta_wide <- LDA_topics %>%
+  mutate(topic = paste0("topic", topic)) %>%
+  pivot_wider(names_from = topic, values_from = beta) %>% 
+  filter(topic1 > .001 | topic2 > .001) %>%
+  mutate(log_ratio = log2(topic2 / topic1)))
+```
