@@ -15,6 +15,7 @@ if (!require("ggraph")) {install.packages("ggraph"); require("ggraph")}
 if (!require("ggplot2")) {install.packages("ggplot2"); require("ggplot2")}
 if (!require("Matrix")) {install.packages("Matrix"); require("Matrix")}
 if (!require("officer")) {install.packages("officer"); require("officer")}
+if (!require("openai")) {install.packages("openai"); require("openai")}
 if (!require("textdata")) {install.packages("textdata"); require("textdata")}
 if (!require("tidyverse")) {install.packages("tidyverse"); require("tidyverse")}
 if (!require("tidytext")) {install.packages("tidytext"); require("tidytext")}
@@ -54,10 +55,27 @@ visualize_bigrams <- function(bigrams) {
 
 ```{r Set up}
 # set the participant ID name and file path for all forthcoming files per participant
-id_name = "P87" 
+id_name = "P56" 
 
 file_path <- file.path("Data", id_name)
 dir.create(file_path)
+```
+
+```{r OpenAI}
+Sys.setenv(OPENAI_API_KEY = 'my_key')
+
+# Import mp3
+rec_file <- sprintf("%s_MERGED.mp3", id_name) # Import the participant that was set above
+transcript_file <- file.path(file_path, sprintf("%s_Transcription.docx", id_name))
+                  
+# Generate transcript
+transcript <- openai::create_transcription(model = "whisper-1", rec_file)
+transcript$text
+
+# Save transcript in the participant folder
+read_docx() |>
+  body_add_par(value = transcript$text, style = "normal") |>
+  print(target = transcript_file)
 ```
 
 ```{r Data}
@@ -180,7 +198,7 @@ tidy_text %>%
   count(word, sentiment, sort = TRUE) %>%
   ungroup())
 # Visualize ^
-bing_plot <- bing_word_counts %>%
+(bing_plot <- bing_word_counts %>%
   group_by(sentiment) %>%
   slice_max(n, n = 10) %>%
   ungroup() %>%
@@ -196,7 +214,7 @@ bing_plot <- bing_word_counts %>%
     panel.grid.minor = element_line(color = "grey"),
     panel.background = element_rect(fill = "white"),
     plot.background = element_rect(fill = "white")
-  )
+  ))
 
 # Save the descriptive sentiment visualization
 # This will automatically append the right participant ID (set above) and save to that ID's folder
@@ -205,6 +223,98 @@ file_path_nrc <- file.path("Data", id_name, paste0(id_name, "_sentiment_fig_nrc.
 file_path_bing <- file.path("Data", id_name, paste0(id_name, "_sentiment_fig_bing.png"))
 ggsave(nrc_plot, filename = file_path_nrc)
 ggsave(bing_plot, filename = file_path_bing)
+```
+
+```{r Sentiment score plot}
+# Plot the sentiment score for chunks of words (e.g., every 100 words)
+
+# First, divide the text into chunks
+tidy_text <- tidy_text %>%
+  mutate(word_count = row_number(),
+         index = (word_count - 1) %/% 100 # change this number to how many words per chunk you want
+         + 1)
+
+# Plot the score using the different dictionaries
+
+# bing
+bing_tidy <- tidy_text %>% 
+  inner_join(get_sentiments("bing")) %>% 
+  mutate(method = "Bing et al.") %>%
+   count(method, index, sentiment) %>% 
+   pivot_wider(names_from = sentiment,
+              values_from = n,
+              values_fill = 0) %>%
+  mutate(sentiment = positive - negative) # this makes the sentiment score 
+
+ggplot(bing_tidy, aes(x = index, y = sentiment, fill = factor(1))) +
+  geom_bar(alpha = 0.5, stat = "identity", show.legend = FALSE) +
+  labs(title = "Sentiment over 100 words of text",
+       x = "Chunk",
+       y = "Sentiment score (bing)") +
+  theme_minimal() +
+  theme(panel.grid.major = element_line(color = "grey"),
+        panel.grid.minor = element_line(color = "grey"),
+        panel.background = element_rect(fill = "white"),
+        plot.background = element_rect(fill = "white"))
+
+# nrc
+(nrc_tidy <- tidy_text %>% 
+  inner_join(get_sentiments("nrc") %>%
+               # only get positive and negative sentiments
+               filter(sentiment %in% c("positive", "negative"))) %>% 
+    mutate(method = "nrc") %>%
+  count(method, index, sentiment) %>% 
+   pivot_wider(names_from = sentiment,
+              values_from = n,
+              values_fill = 0) %>%
+  mutate(sentiment = positive - negative))
+
+ggplot(nrc_tidy, aes(index, sentiment, fill = method)) +
+  geom_col() +
+  labs(title = "Sentiment over 100 words of text",
+       x = "Chunk",
+       y = "Sentiment score (nrc)") +
+  theme_minimal() +
+  theme(panel.grid.major = element_line(color = "grey"),
+        panel.grid.minor = element_line(color = "grey"),
+        panel.background = element_rect(fill = "white"),
+        plot.background = element_rect(fill = "white"))
+
+# afinn
+(afinn_tidy <- tidy_text %>% 
+  inner_join(get_sentiments("afinn")) %>% 
+  group_by(index) %>% 
+  summarise(sentiment = sum(value)) %>% 
+  mutate(method = "AFINN"))
+
+ggplot(afinn_tidy, aes(index, sentiment, fill = method)) +
+  geom_col() +
+  labs(title = "Sentiment over 100 words of text",
+       x = "Chunk",
+       y = "Sentiment score (AFINN)") +
+  theme_minimal() +
+  theme(panel.grid.major = element_line(color = "grey"),
+        panel.grid.minor = element_line(color = "grey"),
+        panel.background = element_rect(fill = "white"),
+        plot.background = element_rect(fill = "white"))
+
+# Look at sentiment scores for all methods
+all_dictionaries <- bind_rows(afinn_tidy,
+                              bing_tidy, 
+                              nrc_tidy)
+
+(sentiment_chunks_plot <- ggplot(all_dictionaries, aes(index, sentiment, fill = method)) +
+  geom_col(show.legend = FALSE) +
+  theme_minimal() +
+  theme(panel.grid.major = element_line(color = "grey"),
+        panel.grid.minor = element_line(color = "grey"),
+        panel.background = element_rect(fill = "white"),
+        plot.background = element_rect(fill = "white")) +
+  facet_wrap(~method, ncol = 1, scales = "free_y") +
+  ggtitle("Sentiment over chunks of text with different lexicons"))
+
+file_path_sentiment_chunks <- file.path("Data", id_name, paste0(id_name, "_sentiment_fig_chunks.png"))
+ggsave(sentiment_chunks_plot, filename = file_path_sentiment_chunks)
 ```
 
 ```{r Word cloud}
@@ -216,6 +326,7 @@ tidy_text %>%
 
 # Split by positive and negative
 tidy_text %>%
+  anti_join(stop_words) %>% # if you want to filter out stop words
   inner_join(get_sentiments("bing")) %>%
   count(word, sentiment, sort = TRUE) %>%
   acast(word ~ sentiment, value.var = "n", fill = 0) %>%
@@ -223,8 +334,9 @@ tidy_text %>%
                    max.words = 100)
 
 file_path_bing <- file.path("Data", id_name, paste0(id_name, "_wordcloud_bing.png"))
-png(filename = file_path_bing, width = 800, height = 600)
+png(filename = file_path_bing)
 tidy_text %>%
+  anti_join(stop_words) %>% # if you want to filter out stop words
   inner_join(get_sentiments("bing")) %>%
   count(word, sentiment, sort = TRUE) %>%
   acast(word ~ sentiment, value.var = "n", fill = 0) %>%
@@ -289,14 +401,14 @@ bigrams_filtered <- bigrams_separated %>%
   count(word1, word2, word3, sort = TRUE))
 # "beliefs"-"radically"-"changing", etc.
 
-# If you want to see all the words that come before another word (e.g., what words commonly appear before / after "change"?)
+# If you want to see all the words that come before another word (e.g., what words commonly appear before / after "mental"?)
 bigrams_filtered %>%
-  filter(word2 == "change") %>%
+  filter(word2 == "mental") %>%
   count(word1, sort = TRUE)
 # biggest, drastically, etc.
 
 bigrams_separated %>%
-  filter(word1 == "change") %>%
+  filter(word1 == "mental") %>%
   count(word1, word2, sort = TRUE)
 
 # Look at the most frequent words that were preceded by another word (e.g., “not”) and were associated with a sentiment.
@@ -365,7 +477,7 @@ text_bigrams %>%
   visualize_bigrams()
 ```
 
-```{r Change format}
+```{r Document-term matrix format}
 # Change into document-term matrix format
 (Transcript_dtm <- tidy_text %>%
   count(document = 1, word) %>%
@@ -396,10 +508,24 @@ top_terms %>%
   scale_y_reordered()
 # look at the terms in each topic (cluser 1/2). The terms are allowed to overlap. This is a good thing - an advantage of topic modeling (vs “hard clustering” methods) - since topics used in natural language  have  overlap in terms of words
 
-# Look at the words with the *greatest difference between topics*
+# Look at the words with the *greatest difference between topics* via log ratio
 (beta_wide <- LDA_topics %>%
   mutate(topic = paste0("topic", topic)) %>%
   pivot_wider(names_from = topic, values_from = beta) %>% 
   filter(topic1 > .001 | topic2 > .001) %>%
   mutate(log_ratio = log2(topic2 / topic1)))
+
+# limit to 10 largest and smallest log ratios
+beta_wide <- bind_rows(
+  beta_wide %>% 
+    slice_min(log_ratio, n = 10) %>%
+    mutate(topic = "topic1"),
+  beta_wide %>%
+    slice_max(log_ratio, n = 10) %>%
+    mutate(topic = "topic2"))
+
+ggplot(beta_wide, aes(x = log_ratio, y = term))+
+  geom_col()+
+  facet_grid(rows = vars(topic), scales = "free_y")+
+  labs(x = "Log Ratio", y = "Term")
 ```
