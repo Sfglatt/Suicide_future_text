@@ -4,7 +4,7 @@ output: html_notebook
 ---
 
 ```{r Github}
-# usethis::create_from_github("https://github.com/Sfglatt/Suicide_text.git",
+# usethis::create_from_github("https://github.com/Sfglatt/Suicide_future_text.git",
 #                            destdir = "Github/Suicide_text")
 ```
 
@@ -16,6 +16,7 @@ if (!require("ggplot2")) {install.packages("ggplot2"); require("ggplot2")}
 if (!require("Matrix")) {install.packages("Matrix"); require("Matrix")}
 if (!require("officer")) {install.packages("officer"); require("officer")}
 if (!require("openai")) {install.packages("openai"); require("openai")}
+if (!require("readtext")) {install.packages("readtext"); require("readtext")}
 if (!require("spacyr")) {install.packages("spacyr"); require("spacyr")}
 if (!require("text")) {install.packages("text"); require("text")}
 if (!require("textdata")) {install.packages("textdata"); require("textdata")}
@@ -37,8 +38,8 @@ count_bigrams <- function(dataset) {
   dataset %>%
     unnest_tokens(bigram, text, token = "ngrams", n = 2) %>%
     separate(bigram, c("word1", "word2"), sep = " ") %>%
-    filter(!word1 %in% stop_words$word,
-           !word2 %in% stop_words$word) %>%
+    filter(!word1 %in% stop_words_df$word,
+           !word2 %in% stop_words_df$word) %>%
     count(word1, word2, sort = TRUE)
 }
 
@@ -58,18 +59,18 @@ visualize_bigrams <- function(bigrams) {
 
 ```{r Set up}
 # set the participant ID name and file path for all forthcoming files per participant
-id_name = "P56" 
+id_name = "P2" 
 
 file_path <- file.path("Data", id_name)
 dir.create(file_path)
 ```
 
-```{r OpenAI}
+```{r OpenAI, eval = FALSE}
 Sys.setenv(OPENAI_API_KEY = 'my_key')
 
 # Import mp3
 rec_file <- sprintf("%s_MERGED.mp3", id_name) # Import the participant that was set above
-transcript_file <- file.path(file_path, sprintf("%s_Transcription.docx", id_name))
+transcript_file <- file.path(file_path, sprintf("%s_Transcript.docx", id_name))
                   
 # Generate transcript
 transcript <- openai::create_transcription(model = "whisper-1", rec_file)
@@ -83,7 +84,7 @@ read_docx() |>
 
 ```{r Data}
 # Import transcript
-Transcript_doc <- read_docx("P56_Transcript.docx")
+Transcript_doc <- read_docx("Transcripts/P2_Transcript.docx")
 
 # Extract text 
 text_data <- docx_summary(Transcript_doc) %>%
@@ -225,8 +226,6 @@ tidy_text %>%
     plot.background = element_rect(fill = "white")
   ))
 
-nrc_plot
-
 # Save the descriptive sentiment visualization
 # This will automatically append the right participant ID (set above) and save to that ID's folder
 dir.create(file.path("Data", id_name), showWarnings = FALSE, recursive = TRUE)
@@ -330,14 +329,17 @@ ggsave(sentiment_chunks_plot, filename = file_path_sentiment_chunks)
 
 ```{r Word cloud}
 # Basic
+
+data("stop_words")
+
 tidy_text %>%
-  anti_join(stop_words) %>%
+  anti_join(stop_words_df) %>%
   count(word) %>%
   with(wordcloud(word, n, max.words = 100))
 
 # Split by positive and negative
 tidy_text %>%
-  anti_join(stop_words) %>% # if you want to filter out stop words
+  anti_join(stop_words_df) %>% # if you want to filter out stop words
   inner_join(get_sentiments("bing")) %>%
   count(word, sentiment, sort = TRUE) %>%
   acast(word ~ sentiment, value.var = "n", fill = 0) %>%
@@ -347,7 +349,7 @@ tidy_text %>%
 file_path_bing <- file.path("Data", id_name, paste0(id_name, "_wordcloud_bing.png"))
 png(filename = file_path_bing)
 tidy_text %>%
-  anti_join(stop_words) %>% # if you want to filter out stop words
+  anti_join(stop_words_df) %>% # if you want to filter out stop words
   inner_join(get_sentiments("bing")) %>%
   count(word, sentiment, sort = TRUE) %>%
   acast(word ~ sentiment, value.var = "n", fill = 0) %>%
@@ -389,8 +391,8 @@ bigrams_separated <- text_data_bigrams %>%
   separate(bigram, c("word1", "word2"), sep = " ")
 
 bigrams_filtered <- bigrams_separated %>%
-  filter(!word1 %in% stop_words$word) %>%
-  filter(!word2 %in% stop_words$word)
+  filter(!word1 %in% stop_words_df$word) %>%
+  filter(!word2 %in% stop_words_df$word)
 
 # new bigram counts:
 (bigram_counts <- bigrams_filtered %>% 
@@ -406,9 +408,9 @@ bigrams_filtered <- bigrams_separated %>%
   unnest_tokens(trigram, text, token = "ngrams", n = 3) %>%
   filter(!is.na(trigram)) %>%
   separate(trigram, c("word1", "word2", "word3"), sep = " ") %>%
-  filter(!word1 %in% stop_words$word,
-         !word2 %in% stop_words$word,
-         !word3 %in% stop_words$word) %>%
+  filter(!word1 %in% stop_words_df$word,
+         !word2 %in% stop_words_df$word,
+         !word3 %in% stop_words_df$word) %>%
   count(word1, word2, word3, sort = TRUE))
 # "beliefs"-"radically"-"changing", etc.
 
@@ -541,7 +543,7 @@ ggplot(beta_wide, aes(x = log_ratio, y = term))+
   labs(x = "Log Ratio", y = "Term")
 ```
 
-```{r Emoxicon}
+```{r Emoxicon, eval = FALSE}
 
 (emoxicon_scores <- transforEmotion::emoxicon_scores(tidy_text$word
                                                      # needs to be in the 1 per row form
@@ -549,9 +551,11 @@ ggplot(beta_wide, aes(x = log_ratio, y = term))+
                                                      # modification of the lexicon of Araque et al., (2018).
                                                      # exclude
                                                      ))
+
+head(emoxicon_scores)
 ```
 
-```{r SpaceyR}
+```{r SpaceyR, eval = FALsE}
 # Not particularly useful for study Qs
 
 spacy_install()
@@ -584,4 +588,155 @@ nounphrase_extract(parsedtxt)
 nounphrase_consolidate(parsedtxt) 
 
 spacy_finalize()
+```
+
+# Group
+```{r Group data}
+docs_path <- "Transcripts"
+transcripts <- readtext(paste0(docs_path, "/*.docx"))
+transcripts
+
+# add suicidal identifier. I'm programming that IDs under 95 are suicidal and IDs 95 and higher are non-suicidal. This will make a 'group' variable with this information:
+transcripts <- transcripts %>%
+  mutate(participant_id = tools::file_path_sans_ext(basename(doc_id)),
+         group = case_when(
+           as.numeric(gsub("[^0-9]", "", participant_id)) < 95 ~ "suicidal",
+           as.numeric(gsub("[^0-9]", "", participant_id)) >= 95 ~ "not_suicidal",
+           TRUE ~ NA_character_
+         ))
+
+transcripts # Confirm. Good
+```
+
+```{r Group sentiment}
+tidy_transcripts <- transcripts %>%
+  unnest_tokens(word, text) %>%
+  anti_join(stop_words_df, by = "word")
+
+# Word Frequency s
+(word_freq <- tidy_transcripts %>%
+  count(group, word, sort = TRUE))
+
+# Sentiment
+# bing
+(bing_sentiments <- tidy_transcripts %>%
+  inner_join(get_sentiments("bing"), by = "word") %>%
+  count(group, sentiment) %>%
+  spread(sentiment, n, fill = 0) %>%
+  mutate(sentiment = positive - negative))
+# Don't forget that this will change based on how *many* people are in each group! e.g., I currently have 2 non-suicidal and 7 suicidal, so since sentiment is based on counts, it will be skewed. 
+
+bing_word_counts <- tidy_transcripts %>%
+  inner_join(get_sentiments("bing"), by = "word") %>%
+  count(group, sentiment, word, sort = TRUE) %>%
+  ungroup()
+
+# Visualize^ 
+(bing_plot <- bing_word_counts %>%
+  group_by(group, sentiment) %>%
+  slice_max(n, n = 10) %>%
+  ungroup() %>%
+  mutate(word = reorder_within(word, n, group)) %>%
+  ggplot(aes(n, word, fill = sentiment)) +
+  geom_col(show.legend = FALSE) +
+  facet_wrap(~ group + sentiment, scales = "free_y") +
+  labs(x = "Contribution to sentiment",
+       y = NULL,
+       title = "Words contributing to sentiment by group (S/NS)") +
+  scale_y_reordered() +
+  theme_minimal() +
+  theme(
+    panel.grid.major = element_line(color = "grey"),
+    panel.grid.minor = element_line(color = "grey"),
+    panel.background = element_rect(fill = "white"),
+    plot.background = element_rect(fill = "white")
+  ))
+# Same disclaimer as above
+
+# nrc
+nrc_word_counts <- tidy_transcripts %>%
+  inner_join(get_sentiments("nrc"), by = "word") %>%
+  count(group, word, sentiment, sort = TRUE) %>%
+  ungroup()
+
+# Visualize ^ 
+(nrc_plot <- nrc_word_counts %>%
+  group_by(group, sentiment) %>%
+  slice_max(n, n = 10) %>%
+  ungroup() %>%
+  mutate(word = reorder_within(word, n, group)) %>%
+  ggplot(aes(n, word, fill = sentiment)) +
+  geom_col(show.legend = FALSE) +
+  facet_wrap(~ group + sentiment, scales = "free_y") +
+  labs(x = "Contribution to sentiment",
+       y = NULL,
+       title = "Top words contributing to sentiment by group (S/NS)") +
+  scale_y_reordered() +
+  theme_minimal() +
+  theme(
+    panel.grid.major = element_line(color = "grey"),
+    panel.grid.minor = element_line(color = "grey"),
+    panel.background = element_rect(fill = "white"),
+    plot.background = element_rect(fill = "white")
+  ))
+# Same disclaimer as above
+
+#### Sentiment score for each document ####
+# nrc
+(sentiment_scores_nrc <- tidy_transcripts %>%
+  inner_join(get_sentiments("nrc"), by = "word") %>%
+  group_by(participant_id, group, sentiment) %>%
+  summarize(score = n()) %>%
+  ungroup() %>%
+  spread(sentiment, score, fill = 0))
+
+# bing
+(sentiment_scores_bing <- tidy_transcripts %>%
+  inner_join(get_sentiments("bing"), by = "word") %>%
+  group_by(participant_id, group, sentiment) %>%
+  summarize(score = n()) %>%
+  ungroup() %>%
+  spread(sentiment, score, fill = 0))
+
+# nrc average sentiment scores by group 
+(average_sentiment_nrc <- sentiment_scores_nrc %>%
+  group_by(group) %>%
+  summarize(across(-participant_id, mean, na.rm = TRUE)))
+
+# bing average sentiment scores by group 
+(average_sentiment_bing <- sentiment_scores_bing %>%
+  group_by(group) %>%
+  summarize(across(-participant_id, mean, na.rm = TRUE)))
+
+# reshape nrc
+average_sentiment_nrc_long <- average_sentiment_nrc %>%
+  pivot_longer(cols = -group, names_to = "sentiment", values_to = "average_score")
+
+# reshape bing
+average_sentiment_bing_long <- average_sentiment_bing %>%
+  pivot_longer(cols = -group, names_to = "sentiment", values_to = "average_score")
+
+# Visualize nrc average
+(ggplot(average_sentiment_nrc_long, aes(x = sentiment, y = average_score, fill = group)) +
+  geom_col(position = "dodge") +
+  labs(x = "Sentiment", y = "Average Score", title = "Average sentiment by group (NRC)") +
+  theme_minimal() +
+  theme(
+    panel.grid.major = element_line(color = "grey"),
+    panel.grid.minor = element_line(color = "grey"),
+    panel.background = element_rect(fill = "white"),
+    plot.background = element_rect(fill = "white")
+  ))
+
+# Visualize bing average
+(ggplot(average_sentiment_bing_long, aes(x = sentiment, y = average_score, fill = group)) +
+  geom_col(position = "dodge") +
+  labs(x = "Sentiment", y = "Average Score", title = "Average sentiment by group (bing)") +
+  theme_minimal() +
+  theme(
+    panel.grid.major = element_line(color = "grey"),
+    panel.grid.minor = element_line(color = "grey"),
+    panel.background = element_rect(fill = "white"),
+    plot.background = element_rect(fill = "white")
+  ))
 ```
