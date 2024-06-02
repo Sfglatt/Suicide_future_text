@@ -54,7 +54,7 @@ visualize_bigrams <- function(bigrams) {
 
 ```{r Set up}
 # set the participant ID name and file path for all forthcoming files per participant
-id_name = "P57" 
+id_name = "P87" 
 
 file_path <- file.path("Data", id_name)
 dir.create(file_path)
@@ -62,7 +62,7 @@ dir.create(file_path)
 
 ```{r Data}
 # Import transcript
-Transcript_doc <- read_docx("P57_Transcript.docx")
+Transcript_doc <- read_docx("P87_Transcript.docx")
 
 # Extract text 
 text_data <- docx_summary(Transcript_doc) %>%
@@ -165,7 +165,14 @@ tidy_text %>%
   geom_col(show.legend = FALSE) +
   facet_wrap(~sentiment, scales = "free_y") +
   labs(x = "Contribution to sentiment",
-       y = NULL))
+       y = NULL)) +
+  theme_minimal() +
+  theme(
+    panel.grid.major = element_line(color = "grey"),
+    panel.grid.minor = element_line(color = "grey"),
+    panel.background = element_rect(fill = "white"),
+    plot.background = element_rect(fill = "white")
+  )
 
 # bing
 (bing_word_counts <- tidy_text %>%
@@ -173,16 +180,23 @@ tidy_text %>%
   count(word, sentiment, sort = TRUE) %>%
   ungroup())
 # Visualize ^
-(bing_plot <- bing_word_counts %>%
+bing_plot <- bing_word_counts %>%
   group_by(sentiment) %>%
-  slice_max(n, n = 10) %>% 
+  slice_max(n, n = 10) %>%
   ungroup() %>%
   mutate(word = reorder(word, n)) %>%
   ggplot(aes(n, word, fill = sentiment)) +
   geom_col(show.legend = FALSE) +
   facet_wrap(~sentiment, scales = "free_y") +
   labs(x = "Contribution to sentiment",
-       y = NULL))
+       y = NULL) +
+  theme_minimal() +
+  theme(
+    panel.grid.major = element_line(color = "grey"),
+    panel.grid.minor = element_line(color = "grey"),
+    panel.background = element_rect(fill = "white"),
+    plot.background = element_rect(fill = "white")
+  )
 
 # Save the descriptive sentiment visualization
 # This will automatically append the right participant ID (set above) and save to that ID's folder
@@ -363,7 +377,7 @@ text_bigrams %>%
 # Latent Dirichlet allocation (LDA) is a way of doing ^^.
 
 (Transcript_lda <- LDA(Transcript_dtm, 
-                       k = 4,
+                       k = 2,
                        # The number of 'topics' you want to model
                        control = list(seed = 123456)))
 (LDA_topics <- tidy(Transcript_lda, matrix = "beta"))
