@@ -16,10 +16,13 @@ if (!require("ggplot2")) {install.packages("ggplot2"); require("ggplot2")}
 if (!require("Matrix")) {install.packages("Matrix"); require("Matrix")}
 if (!require("officer")) {install.packages("officer"); require("officer")}
 if (!require("openai")) {install.packages("openai"); require("openai")}
+if (!require("spacyr")) {install.packages("spacyr"); require("spacyr")}
+if (!require("text")) {install.packages("text"); require("text")}
 if (!require("textdata")) {install.packages("textdata"); require("textdata")}
 if (!require("tidyverse")) {install.packages("tidyverse"); require("tidyverse")}
 if (!require("tidytext")) {install.packages("tidytext"); require("tidytext")}
 if (!require("tm")) {install.packages("tm"); require("tm")}
+if (!require("transforEmotion")) {install.packages("transforEmotion"); require("transforEmotion")}
 if (!require("topicmodels")) {install.packages("topicmodels"); require("topicmodels")}
 if (!require("readr")) {install.packages("readr"); require("readr")}
 if (!require("reshape2")) {install.packages("reshape2"); require("reshape2")}
@@ -80,7 +83,7 @@ read_docx() |>
 
 ```{r Data}
 # Import transcript
-Transcript_doc <- read_docx("P87_Transcript.docx")
+Transcript_doc <- read_docx("P56_Transcript.docx")
 
 # Extract text 
 text_data <- docx_summary(Transcript_doc) %>%
@@ -92,14 +95,17 @@ text_data <- docx_summary(Transcript_doc) %>%
 # Convert to dataframe
 text_df <- data.frame(text = text_data, stringsAsFactors = FALSE)
 
+# To remove / keep punctuation, uncomment and run the below lines:
+# text_punc <- punctuate(text_df, 
+#                        allowPunctuations = c("-", "?", "'", "\"", ";", ",", ".", "!"))
+# use text_punc instead of text_df if choosing to do this
+
 # Unnest tokens
 tidy_text <- text_df %>%
   unnest_tokens(word, text)
 
 # Look
 print(head(tidy_text))
-
-# Save as CSV 
 
 # Save data in CSV form
 # This will automatically append the right participant ID (above) and date
@@ -114,8 +120,11 @@ write.csv(tidy_text, file = full_filename, row.names = FALSE)
 # remove stop words 
 data(stop_words)
 
+stop_words_df <- data.frame(word = stop_words)
+
 tidy_text <- tidy_text %>%
-  anti_join(stop_words)
+  anti_join(stop_words_df)
+head(tidy_text)
 
 # Most common words
 tidy_text %>%
@@ -215,6 +224,8 @@ tidy_text %>%
     panel.background = element_rect(fill = "white"),
     plot.background = element_rect(fill = "white")
   ))
+
+nrc_plot
 
 # Save the descriptive sentiment visualization
 # This will automatically append the right participant ID (set above) and save to that ID's folder
@@ -528,4 +539,49 @@ ggplot(beta_wide, aes(x = log_ratio, y = term))+
   geom_col()+
   facet_grid(rows = vars(topic), scales = "free_y")+
   labs(x = "Log Ratio", y = "Term")
+```
+
+```{r Emoxicon}
+
+(emoxicon_scores <- transforEmotion::emoxicon_scores(tidy_text$word
+                                                     # needs to be in the 1 per row form
+                                                     # Using the default language - 
+                                                     # modification of the lexicon of Araque et al., (2018).
+                                                     # exclude
+                                                     ))
+```
+
+```{r SpaceyR}
+# Not particularly useful for study Qs
+
+spacy_install()
+
+spacy_initialize(model = "en_core_web_sm")
+
+(parsedtxt <- spacy_parse(text_df$text)) 
+
+# process documents and get a data table
+spacy_parse(text_df$text, tag = TRUE, entity = FALSE, lemma = FALSE)
+
+# Parse texts
+spacy_tokenize(text_df$text)
+
+# Output a dataframe
+spacy_tokenize(txt, remove_punct = TRUE, output = "data.frame") %>%
+    tail()
+
+### Extract language properties 
+# Extract entities; “Extended” entities include entities like dates, events, and cardinal or ordinal quantities
+parsedtxt <- spacy_parse(text_df$text, lemma = FALSE, entity = TRUE, nounphrase = TRUE)
+entity_extract(parsedtxt)
+# compound multi-word things into single entities
+entity_consolidate(parsedtxt) %>%
+    tail()
+
+# Extract nouns
+nounphrase_extract(parsedtxt)
+# Compount multi-word things to single tokens
+nounphrase_consolidate(parsedtxt) 
+
+spacy_finalize()
 ```
