@@ -55,6 +55,36 @@ visualize_bigrams <- function(bigrams) {
     geom_node_text(aes(label = name), vjust = 1, hjust = 1) +
     theme_void()
 }
+
+# pre-trained vector function
+proc_pretrained_vec <- function(p_vec) {
+  
+  vals <- vector(mode = "list", length(p_vec))
+  names <- character(length(p_vec))
+  
+  #loop through to gather values and names of each word
+  for(i in 1:length(p_vec)) {
+    #if(i %% 1000 == 0) {print(i)}
+    this_vec <- p_vec[i]
+    this_vec_unlisted <- unlist(strsplit(this_vec, " "))
+    this_vec_values <- as.numeric(this_vec_unlisted[-1])
+    this_vec_name <- this_vec_unlisted[1]
+    
+    vals[[i]] <- this_vec_values
+    names[[i]] <- this_vec_name
+  }
+  
+  #convert lists to data.frame and attach the names
+  embedding <- data.frame(vals)
+  names(embedding) <- names
+  
+  return(embedding)
+}
+
+# function that looks up the word embedding for a target word
+embed_word <- function(word_a) {
+  embed_vec <- pretrained_embedding[[word_a]]
+}
 ```
 
 ```{r Set up}
@@ -739,4 +769,47 @@ average_sentiment_bing_long <- average_sentiment_bing %>%
     panel.background = element_rect(fill = "white"),
     plot.background = element_rect(fill = "white")
   ))
+```
+
+```{r Cosine similarity, eval = FALSE}
+
+embedding_ref <- scan(file = "txt_file", what = "", sep = "\n")
+
+t_temp <- Sys.time()
+
+# This uses the vector function ('Functions' chunk) to process a word embedding .txt file and export a data frame of words and their respective 300-dimension vectors
+(pretrained_embedding <- proc_pretrained_vec(embedding_ref))  
+
+(t_elap_temp <- paste0(round(as.numeric(Sys.time() - t_temp, units="mins"), digits = 2), " minutes"))
+
+# Cosine similarity
+# load some specific embeddings for words to test cosine similarity; starting with 5 words
+future <- embed_word("future")
+self <- embed_word("self")
+health <- embed_word("health")
+love <- embed_word("love")
+family <- embed_word("family")
+
+# Use the cosine function ('Functions' chunk) to assess the semantic similarity between these words
+
+cosine(future, self) # future and self
+cosine(self, health) # self and health
+cosine(health, love) # health and love
+cosine(love, family) # love and family
+
+# Cosine similarity visualization}
+test.list <- list()
+test.list <- cbind(future, self, health, love, family)
+
+cosmat <- cosine(test.list)
+melted_cosmat <- melt(cosmat)
+
+names(melted_cosmat)[names(melted_cosmat) == "Var1"] <- "Words_1"
+names(melted_cosmat)[names(melted_cosmat) == "Var2"] <- "Words_2"
+
+
+ggplot(data = melted_cosmat, aes(x = Words_1, y = Words_2, fill = value)) +
+  geom_tile(color = "white") +
+  scale_fill_gradient2(low = "white", high = "skyblue4", mid = "skyblue2",
+                       midpoint = 0.50, name = "Cosine Similarity")
 ```
