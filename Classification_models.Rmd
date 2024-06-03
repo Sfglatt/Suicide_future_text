@@ -1,0 +1,340 @@
+---
+title: "Prediction"
+output: html_notebook
+---
+
+```{r Packages}
+if (!require("discrim")) {install.packages("discrim"); require("discrim")}
+if (!require("quanteda")) {install.packages("quanteda"); require("quanteda")}
+if (!require("naivebayes")) {install.packages("naivebayes"); require("naivebayes")}
+if (!require("recipes")) {install.packages("recipes"); require("recipes")}
+if (!require("scales")) {install.packages("scales"); require("scales")}
+if (!require("SnowballC")) {install.packages("SnowballC"); require("SnowballC")}
+if (!require("textrecipes")) {install.packages("textrecipes"); require("textrecipes")}
+if (!require("themis")) {install.packages("themis"); require("themis")}
+if (!require("tidymodels")) {install.packages("tidymodels"); require("tidymodels")}
+if (!require("tidytext")) {install.packages("tidytext"); require("tidytext")}
+if (!require("tidyverse")) {install.packages("tidyverse"); require("tidyverse")}
+if (!require("vip")) {install.packages("vip"); require("vip")}
+```
+
+```{r Data}
+# Use 'transcripts' from the text processing / sentiment file. This has participants' transcripts and suicide risk status. 
+
+# Prepare the data
+
+# Remove stop words *if not already done in text processing*
+tidy_transcripts_stop <- transcripts %>%
+  unnest_tokens(word, text) %>%
+  anti_join(stop_words, by = "word")
+
+# stem the data
+tidy_text_stop_stem = tidy_transcripts_stop %>%
+  mutate(stem = wordStem(word))
+
+# unique count of words after stemming and stopping
+tidy_text_stop_stem %>%
+count(stem, sort = TRUE) %>%
+  nrow() 
+
+# most frequent words
+tidy_text_stop_stem %>% group_by(word) %>% 
+  summarise(count = n()) %>% 
+  arrange(desc(count)) %>% 
+  head(10)
+# life, future, family
+
+tidy_text_stem_stop %>% group_by(stem) %>% 
+  summarise(count = n()) %>% 
+  arrange(desc(count)) %>% 
+  head(10)
+```
+
+# Classification model 
+```{r Set up}
+# Resolve conflicts
+
+# Split into training and testing
+set.seed(123456)
+transcript_df_split <- transcripts %>% initial_split(0.7,              # default 3/4 for training and 1/4 for testing
+                                                    strata = group)    # strata to specify sampling (stratified random)
+
+# Training set
+transcript_df_train <- training(transcript_df_split)
+table(transcript_df_train$group)
+
+# Test set
+transcript_df_test <- testing(transcript_df_split)
+table(transcript_df_test$group)
+
+transcript_df_split 
+```
+
+```{r Process}
+# Define recipe for processing
+
+(transcript_rec <- recipe(group ~ text, data = transcript_df_train) %>%
+  step_tokenize(text) %>%                        # tokenization
+  step_stopwords(text) %>%                       # stopwords removal
+  step_stem(text) %>%                            # stem
+  step_tokenfilter(text, max_tokens = 778) %>%   # select tokens
+  step_tfidf(text))                              # convert to tf-idf
+
+table(transcript_df_train$group) # Look at proportion of split. If it is uneven, address it below:
+
+# Define upsample recipe
+(transcript_upsample_rec <- recipe(group ~ text, 
+                                   data = transcript_df_train) %>%
+  step_tokenize(text) %>%
+  step_stopwords(text) %>%
+  step_stem(text) %>%
+  step_tokenfilter(text, max_tokens = 778) %>%
+  step_tfidf(text) %>%
+  step_upsample(group, over_ratio = 1))  # Step to upsample the data to address imbalance
+# Now transcript_upsample_rec has up-sampling
+```
+
+```{r Choose classification model}
+# Define classification models
+
+# Naive Bayes model:
+nb_spec <- naive_Bayes() %>%
+  set_mode("classification") %>%
+  set_engine("naivebayes") 
+
+# Regularized linear model:
+# you can tune the parameters, but these are good starting values
+lasso_spec <- logistic_reg(penalty = 0.01, mixture = 1) %>%
+  set_mode("classification") %>%
+  set_engine("glmnet")
+
+# Look at model specifics
+nb_spec
+## Naive Bayes Model Specification (classification)
+## 
+## Computational engine: naivebayes
+
+lasso_spec
+## Logistic Regression Model Specification (classification)
+## 
+## Main Arguments:
+##   penalty = 0.01
+##   mixture = 1
+## 
+## Computational engine: glmnet
+
+# Set workflow 
+nb_wf <- workflow() %>% 
+  add_recipe(transcript_rec) %>%
+  add_model(nb_spec)
+
+lasso_wf <- workflow() %>%
+  add_recipe(transcript_rec) %>%
+  add_model(lasso_spec) 
+
+nb_fit <- workflow() %>% 
+  add_recipe(transcript_rec) %>%
+  add_model(nb_spec) %>%
+  fit(data = transcript_df_train)
+
+# Predict on the fitted workflow
+predict(nb_fit, transcript_df_test %>% slice(1:5))
+
+lasso_fit <- workflow() %>%
+  add_recipe(transcript_rec) %>%
+  add_model(lasso_spec) %>%
+  fit(data = transcript_df_train)
+
+# Create a 3-fold cross-validation set
+set.seed(123456)
+(transcript_folds <- vfold_cv(transcript_df_train, v = 3))
+## #  3-fold cross-validation 
+## # A tibble: 3 × 2
+##   splits              id   
+##   <list>              <chr>
+## 1 <split [2785/1393]> Fold1
+## 2 <split [2785/1393]> Fold2
+## 3 <split [2786/1392]> Fold3
+
+# Revise workflow for Lasso model
+lasso_wf <- workflow() %>%
+  add_recipe(transcript_rec) %>%
+  add_model(lasso_spec)
+  
+# Create an upsampled revised workflow for Lasso model
+lasso_upsample_wf <- workflow() %>%
+  add_recipe(transcript_upsample_rec) %>%
+  add_model(lasso_spec)
+```
+
+```{r Fit classification model}
+## Fit the model multiple times, once to each of these re-sampled folds, and then evaluate on the left part for each re-sampled fold.
+
+# Without upsampling (imbalanced data)
+set.seed(123456)
+lasso_rs <- fit_resamples(
+  lasso_wf,
+  transcript_folds,
+  control = control_resamples(save_pred = TRUE))
+
+# with upsampling
+set.seed(123456)
+lasso_upsample_rs <- fit_resamples(
+  lasso_upsample_wf,
+  transcript_folds,
+  control = control_resamples(save_pred = TRUE))
+
+## Accuracy and ROC AUC
+
+# Pull metrics
+lasso_rs_metrics <- collect_metrics(lasso_rs)
+lasso_rs_predictions <- collect_predictions(lasso_rs)
+lasso_rs_metrics
+
+# plot ROC curve
+lasso_rs_predictions %>%
+  group_by(id) %>%
+  roc_curve(truth = group, .pred_1, event_level = "second") %>%
+  autoplot() +
+  labs(
+    color = NULL,
+    title = "ROC curve (lasso, no upsampling)",
+    subtitle = "Each resample fold is shown in a different color"
+  )
+
+
+# Plot precision-recall curve
+lasso_rs_predictions %>%
+  group_by(id) %>%
+  pr_curve(truth = group, .pred_1, event_level = "second") %>%
+  autoplot()+
+  labs(
+    color = NULL,
+    title = "Precision Recall curve (lasso, no upsampling)",
+    subtitle = "Each resample fold is shown in a different color"
+  )
+
+# Visualize confusion matrix
+conf_mat_resampled(lasso_rs, tidy = FALSE) %>%
+  autoplot(type = "heatmap")
+
+# & repeat with the upsampled model
+lasso_up_rs_metrics <- collect_metrics(lasso_upsample_rs)
+lasso_up_rs_predictions <- collect_predictions(lasso_upsample_rs)
+lasso_up_rs_metrics
+
+# Plot ROC curve
+lasso_up_rs_predictions %>%
+  group_by(id) %>%
+  roc_curve(truth = group, .pred_1, event_level = "second") %>%
+  autoplot() +
+  labs(
+    color = NULL,
+    title = "ROC curve for (lasso, upsampling)",
+    subtitle = "Each resample fold is shown in a different color"
+  )
+
+# Plot precision-recall curve
+lasso_up_rs_predictions %>%
+  group_by(id) %>%
+  pr_curve(truth = group, .pred_1, event_level = "second") %>%
+  autoplot()+
+  labs(
+    color = NULL,
+    title = "Precision Recall (lasso, upsampling)",
+    subtitle = "Each resample fold is shown in a different color"
+  )
+
+
+# Visualize the confusion matrix
+conf_mat_resampled(lasso_upsample_rs, tidy = FALSE) %>%
+  autoplot(type = "heatmap")
+```
+
+```{r Compare classification model to null model}
+# Assess our classification model by comparing its performance with a “null” baseline model.
+
+null_classification <- null_model() %>%
+  set_engine("parsnip") %>%
+  set_mode("classification")
+
+null_rs <- workflow() %>%
+  add_recipe(transcript_rec) %>%
+  add_model(null_classification) %>%
+  fit_resamples(
+    transcript_folds,control = control_resamples(save_pred = TRUE)
+  )
+
+# Pull metrics for null model
+null_rs %>%
+  collect_metrics()
+
+# Plot ROC curve for null model
+null_rs %>%
+  collect_predictions() %>%
+  group_by(id) %>%
+  roc_curve(truth = group, .pred_1, event_level = "second") %>%
+  autoplot() +
+  labs(
+    color = NULL,
+    title = "ROC curve for NULL Model",
+    subtitle = "Each resample fold is shown in a different color"
+  )
+```
+
+```{r Evaluate classification model on testing set}
+# Evaluate classification model on testing set
+
+# Fit classification on testing set
+final_wf <- last_fit(lasso_upsample_wf, transcript_df_split)
+collect_metrics(final_wf)
+
+# Plot the ROC curve
+collect_predictions(final_wf)  %>%
+  roc_curve(truth = group, .pred_1, event_level = "second") %>%
+  autoplot() +
+  labs(
+    color = NULL,
+    title = "ROC curve",
+    subtitle = "With final tuned lasso regularized classifier on the test set"
+  )
+
+# Visualize the confusion matrix
+collect_predictions(final_wf) %>%
+  conf_mat(truth = group, estimate = .pred_class) %>%
+  autoplot(type = "heatmap")
+```
+
+```{r Most important features in classifying}
+# Most important features in classifying
+
+tidymodels_prefer()
+final_imp <- extract_fit_parsnip(final_wf$.workflow[[1]]) %>%
+  vip::vi()
+
+final_imp%>%filter(Sign == "POS") %>% arrange(desc(Importance)) %>% head(10)
+
+final_imp %>%
+  mutate(
+    Sign = case_when(Sign == "POS" ~ "More about suicide risk",
+                     Sign == "NEG" ~ "Less about suicide risk"),
+    Importance = abs(Importance),
+    Variable = str_remove_all(Variable, "tfidf_text_"),
+  ) %>%
+  group_by(Sign) %>%
+  top_n(20, Importance) %>%
+  ungroup %>%
+  ggplot(aes(x = Importance,
+             y = fct_reorder(Variable, Importance),
+             fill = Sign)) +
+  geom_col(show.legend = FALSE) +
+  scale_x_continuous(expand = c(0, 0)) +
+  facet_wrap(~Sign, scales = "free") +
+  labs(
+    y = NULL,
+    title = "Variable importance for predicting suicide risk",
+    subtitle = paste0("These features are the most important in predicting\n",
+                      "whether descriptions of the future self are from people at risk or not")
+  )
+```
+
