@@ -1,0 +1,85 @@
+---
+title: "Audio processing"
+output: html_notebook
+--- 
+
+```{r Packages}
+if (!require("audio")) {install.packages("audio"); require("audio")}
+if (!require("av")) {install.packages("av"); require("av")}
+if (!require("seewave")) {install.packages("seewave"); require("seewave")}
+if (!require("stringr")) {install.packages("stringr"); require("stringr")}
+if (!require("tuneR")) {install.packages("tuneR"); require("tuneR")}
+```
+
+```{r Functions}
+
+# Read MP3 and convert to WAV
+read_mp3_as_wav <- function(mp3_file) {
+  mp3 <- readMP3(mp3_file)
+  wav <- Wave(left = mp3@left, right = mp3@right, samp.rate = mp3@samp.rate, bit = 16)
+  return(wav)
+}
+
+# Merge WAV files
+merge_wav_files <- function(wav_files) {
+  if (length(wav_files) == 0) return(NULL)
+  merged_wav <- wav_files[[1]]
+  for (i in 2:length(wav_files)) {
+    merged_wav <- bind(merged_wav, wav_files[[i]])
+  }
+  return(merged_wav)
+}
+
+# Process and merge all recordings per participant
+process_recordings <- function(base_dir) {
+  participants <- list.dirs(base_dir, recursive = FALSE)
+  
+  for (participant in participants) {
+    wav_files <- list()
+    
+    # Call the recordings for each participant
+    mp3_files <- list.files(participant, pattern = "\\.mp3$", full.names = TRUE)
+    
+    # Make sure the recordings will be merged in the right order!
+    mp3_files <- mp3_files[order(as.numeric(gsub(".*_R(\\d+)\\.mp3", "\\1", mp3_files)))] 
+    
+    
+    if (length(mp3_files) == 0) {
+      next
+    }
+    
+    for (mp3_file in mp3_files) {
+      # Convert the mp3 to WAV format
+      wav_file <- read_mp3_as_wav(mp3_file)
+      if (!is.null(wav_file)) {
+        wav_files <- c(wav_files, list(wav_file))
+      } else {
+        warning(paste("Failed:", mp3_file))
+      }
+    }
+    
+    if (length(wav_files) > 0) {
+      # Merge the individual recordings (up to 15/ea)
+      merged_wav <- merge_wav_files(wav_files)
+      
+      # Save merged WAV for each participant in their folder
+      participant_id <- basename(participant)
+      date_str <- format(Sys.Date(), "%Y-%m-%d")
+      merged_file_name <- file.path(participant, paste0(participant_id, "_Merged_", date_str, ".wav"))
+      writeWave(merged_wav, merged_file_name)
+    } else {
+      warning(paste("No WAVs for participant:", participant))
+    }
+  }
+}
+```
+
+```{r Merge transcripts for each participant}
+# Use the process_recordings function created in the 'Functions' chunk
+
+# Each participant has a folder with 15 verbal recordings, labeled with their ID. This is merging each participants' recordings and saving it in their respective folders.
+
+base_dir <- "Recordings"
+process_recordings(base_dir)
+# Success. For example "Participant 1_Merged_2024-06-04.wav" is now in the "Participant 1" folder
+```
