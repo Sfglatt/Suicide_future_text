@@ -657,12 +657,7 @@ tidy_transcripts <- transcripts %>%
   mutate(sentiment = positive - negative))
 # Don't forget that this will change based on how *many* people are in each group! e.g., I currently have 2 non-suicidal and 7 suicidal, so since sentiment is based on counts, it will be skewed. 
 
-bing_word_counts <- tidy_transcripts %>%
-  inner_join(get_sentiments("bing"), by = "word") %>%
-  count(group, sentiment, word, sort = TRUE) %>%
-  ungroup()
-
-# Visualize^ 
+# Bing plot
 (bing_plot <- bing_word_counts %>%
   group_by(group, sentiment) %>%
   slice_max(n, n = 10) %>%
@@ -671,9 +666,7 @@ bing_word_counts <- tidy_transcripts %>%
   ggplot(aes(n, word, fill = sentiment)) +
   geom_col(show.legend = FALSE) +
   facet_wrap(~ group + sentiment, scales = "free_y") +
-  labs(x = "Contribution to sentiment",
-       y = NULL,
-       title = "Words contributing to sentiment by group (S/NS)") +
+  labs(x = "Contribution to sentiment", y = NULL, title = "Top words contributing to sentiment by group (S/NS) - Bing") +
   scale_y_reordered() +
   theme_minimal() +
   theme(
@@ -682,15 +675,14 @@ bing_word_counts <- tidy_transcripts %>%
     panel.background = element_rect(fill = "white"),
     plot.background = element_rect(fill = "white")
   ))
-# Same disclaimer as above
 
-# nrc
+# NRC word counts
 nrc_word_counts <- tidy_transcripts %>%
   inner_join(get_sentiments("nrc"), by = "word") %>%
   count(group, word, sentiment, sort = TRUE) %>%
   ungroup()
 
-# Visualize ^ 
+# NRC plot
 (nrc_plot <- nrc_word_counts %>%
   group_by(group, sentiment) %>%
   slice_max(n, n = 10) %>%
@@ -699,9 +691,33 @@ nrc_word_counts <- tidy_transcripts %>%
   ggplot(aes(n, word, fill = sentiment)) +
   geom_col(show.legend = FALSE) +
   facet_wrap(~ group + sentiment, scales = "free_y") +
+  labs(x = "Contribution to sentiment", y = NULL, title = "Top words contributing to sentiment by group (S/NS) - NRC") +
+  scale_y_reordered() +
+  theme_minimal() +
+  theme(
+    panel.grid.major = element_line(color = "grey"),
+    panel.grid.minor = element_line(color = "grey"),
+    panel.background = element_rect(fill = "white"),
+    plot.background = element_rect(fill = "white")
+  ))
+
+# AFINN 
+afinn_word_counts <- tidy_transcripts %>%
+  inner_join(get_sentiments("afinn"), by = "word") %>%
+  count(group, word, value, sort = TRUE) %>%
+  ungroup()
+
+(afinn_plot <- afinn_word_counts %>%
+  group_by(group, value) %>%
+  slice_max(n, n = 10) %>%
+  ungroup() %>%
+  mutate(word = reorder_within(word, n, group)) %>%
+  ggplot(aes(n, word, fill = factor(value))) +
+  geom_col(show.legend = FALSE) +
+  facet_wrap(~ group + value, scales = "free_y") +
   labs(x = "Contribution to sentiment",
        y = NULL,
-       title = "Top words contributing to sentiment by group (S/NS)") +
+       title = "Top words contributing to sentiment by group (S/NS) - AFINN") +
   scale_y_reordered() +
   theme_minimal() +
   theme(
@@ -729,6 +745,13 @@ nrc_word_counts <- tidy_transcripts %>%
   ungroup() %>%
   spread(sentiment, score, fill = 0))
 
+# afinn
+sentiment_scores_afinn <- tidy_transcripts %>%
+  inner_join(get_sentiments("afinn"), by = "word") %>%
+  group_by(group, participant_id) %>%
+  summarize(sentiment_score = sum(value, na.rm = TRUE)) %>%
+  ungroup()
+
 # nrc average sentiment scores by group 
 (average_sentiment_nrc <- sentiment_scores_nrc %>%
   group_by(group) %>%
@@ -739,6 +762,11 @@ nrc_word_counts <- tidy_transcripts %>%
   group_by(group) %>%
   summarize(across(-participant_id, mean, na.rm = TRUE)))
 
+# afinn average sentiment scores by group
+average_sentiment_afinn <- sentiment_scores_afinn %>%
+  group_by(group) %>%
+  summarize(average_sentiment = mean(sentiment_score, na.rm = TRUE))
+
 # reshape nrc
 average_sentiment_nrc_long <- average_sentiment_nrc %>%
   pivot_longer(cols = -group, names_to = "sentiment", values_to = "average_score")
@@ -747,10 +775,14 @@ average_sentiment_nrc_long <- average_sentiment_nrc %>%
 average_sentiment_bing_long <- average_sentiment_bing %>%
   pivot_longer(cols = -group, names_to = "sentiment", values_to = "average_score")
 
+# reshape afinn
+average_sentiment_afinn_long <- average_sentiment_afinn %>%
+  pivot_longer(cols = -group, names_to = "sentiment", values_to = "average_score")
+
 # Visualize nrc average
-(ggplot(average_sentiment_nrc_long, aes(x = sentiment, y = average_score, fill = group)) +
+(average_nrc <- ggplot(average_sentiment_nrc_long, aes(x = sentiment, y = average_score, fill = group)) +
   geom_col(position = "dodge") +
-  labs(x = "Sentiment", y = "Average Score", title = "Average sentiment by group (NRC)") +
+  labs(x = "Sentiment", y = "Average Score", title = "Average sentiment by group - NRC") +
   theme_minimal() +
   theme(
     panel.grid.major = element_line(color = "grey"),
@@ -760,9 +792,9 @@ average_sentiment_bing_long <- average_sentiment_bing %>%
   ))
 
 # Visualize bing average
-(ggplot(average_sentiment_bing_long, aes(x = sentiment, y = average_score, fill = group)) +
+(average_bing <- ggplot(average_sentiment_bing_long, aes(x = sentiment, y = average_score, fill = group)) +
   geom_col(position = "dodge") +
-  labs(x = "Sentiment", y = "Average Score", title = "Average sentiment by group (bing)") +
+  labs(x = "Sentiment", y = "Average Score", title = "Average sentiment by group - bing") +
   theme_minimal() +
   theme(
     panel.grid.major = element_line(color = "grey"),
@@ -771,6 +803,43 @@ average_sentiment_bing_long <- average_sentiment_bing %>%
     plot.background = element_rect(fill = "white")
   ))
 
+# Visualize afinn average
+(average_afinn <- ggplot(average_sentiment_afinn_long, aes(x = sentiment, y = average_score, fill = group)) +
+  geom_col(position = "dodge") +
+  labs(x = "Sentiment", y = "Average Score", title = "Average sentiment by group - AFINN") +
+  theme_minimal() +
+  theme(
+    panel.grid.major = element_line(color = "grey"),
+    panel.grid.minor = element_line(color = "grey"),
+    panel.background = element_rect(fill = "white"),
+    plot.background = element_rect(fill = "white")
+  ))
+
+# visualize distribution of scores
+# afinn
+ggplot(sentiment_scores_afinn, aes(x = sentiment_score, fill = group)) +
+  geom_density(alpha = 0.6) +
+  labs(x = "Sentiment Score", y = "Density", title = "Sentiment Score Distribution by Group (AFINN)") +
+  theme_minimal() +
+  theme(
+    panel.grid.major = element_line(color = "grey"),
+    panel.grid.minor = element_line(color = "grey"),
+    panel.background = element_rect(fill = "white"),
+    plot.background = element_rect(fill = "white")
+  )
+
+#### save ####
+pdf("Example_data/Group_example/Words_contributing_group.pdf", height = 12, width = 10)
+afinn_plot
+nrc_plot
+bing_plot
+dev.off()
+
+pdf("Example_data/Group_example/Average_sentiment_group.pdf", height = 5, width = 7)
+average_afinn
+average_nrc
+average_bing
+dev.off()
 ```
 
 ```{r group bigrams}
@@ -815,7 +884,7 @@ negation_sentiment_words <- negation_bigrams %>%
   ggplot(aes(n, word2, fill = as.factor(value))) +
   geom_col(show.legend = FALSE) +
   facet_wrap(~ group + word1, scales = "free_y") +
-  labs(x = "Frequency", y = NULL, title = "Top words following negation words by group") +
+  labs(x = "Frequency", y = NULL, title = "Top words following negation words by group - AFINN") +
   scale_y_reordered() +
   theme_minimal() +
   theme(
@@ -841,7 +910,7 @@ negation_sentiment_words <- negation_bigrams %>%
   ggplot(aes(n, word2, fill = sentiment)) +
   geom_col(show.legend = FALSE) +
   facet_wrap(~ group + word1, scales = "free_y") +
-  labs(x = "Frequency", y = NULL, title = "Top words following negation words by group") +
+  labs(x = "Frequency", y = NULL, title = "Top words following negation words by group - NRC") +
   scale_y_reordered() +
   theme_minimal() +
   theme(
@@ -850,6 +919,38 @@ negation_sentiment_words <- negation_bigrams %>%
     panel.background = element_rect(fill = "white"),
     plot.background = element_rect(fill = "white")
   ))
+
+
+# sentiment analysis on second word using bing
+# Join bing sentiments and counts
+negation_sentiment_words <- negation_bigrams %>%
+  inner_join(get_sentiments("bing"), by = c("word2" = "word")) %>%
+  count(group, word1, word2, sentiment, sort = TRUE)
+
+(negation_sentiment_plot_bing <- negation_sentiment_words %>%
+  group_by(group, word1) %>%
+  slice_max(n, n = 10) %>%
+  ungroup() %>%
+  mutate(word2 = reorder_within(word2, n, group)) %>%
+  ggplot(aes(n, word2, fill = sentiment)) +
+  geom_col(show.legend = FALSE) +
+  facet_wrap(~ group + word1, scales = "free_y") +
+  labs(x = "Frequency", y = NULL, title = "Top words following negation words by group - BING") +
+  scale_y_reordered() +
+  theme_minimal() +
+  theme(
+    panel.grid.major = element_line(color = "grey"),
+    panel.grid.minor = element_line(color = "grey"),
+    panel.background = element_rect(fill = "white"),
+    plot.background = element_rect(fill = "white")
+  ))
+
+#### save ####
+pdf("Example_data/Group_example/Negation_words_group.pdf", height = 5, width = 7)
+negation_sentiment_plot_afinn
+negation_sentiment_plot_nrc
+negation_sentiment_plot_bing
+dev.off()
 ```
 
 ```{r Cosine similarity, eval = FALSE}
