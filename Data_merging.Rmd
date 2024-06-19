@@ -1,0 +1,252 @@
+---
+title: "Qual_quant_merging"
+output: html_notebook
+---
+
+```{r Packages}
+if (!require("descr")) {install.packages("descr"); require("descr")}
+if (!require("dplyr")) {install.packages("dplyr"); require("dplyr")} 
+if (!require("formatR")) {install.packages("formatR"); require("formatR")} 
+if (!require("psych")) {install.packages("psych"); require("psych")}    
+if (!require("readxl")) {install.packages("readxl"); require("readxl")}    
+if (!require("tidyverse")) {install.packages("tidyverse"); require("tidyverse")} 
+```
+
+```{r Raw datasets}
+Data_round_1 <- read.csv("Raw_data/NLP Round 1 TP1 S - Raw data.csv")
+Data_round_2 <- read.csv("Raw_data/NLP Round 2 TP1 S - Raw data.csv")
+Data_round_3 <- read.csv("Raw_data/NLP Round 3 TP1 S - Raw data.csv")
+Data_round_4 <- read.csv("Raw_data/NLP Round 4 TP1 S  - Raw Data.csv")
+Data_round_5 <- read.csv("Raw_data/NLP Round 5 TP1 NS - Raw data.csv")
+Data_round_6 <- read.csv("Raw_data/NLP Round 6 TP1 NS - Raw data.csv")
+```
+
+```{r Raw merging checks}
+#### Get ducks in a row ####
+
+# Look at variable discrepancies
+setdiff(colnames(Data_round_1), colnames(Data_round_2))
+setdiff(colnames(Data_round_2), colnames(Data_round_1))
+
+# need to resolve discrepancies and make Data_round_1 consistent with Data_round_2, since round_2 is consistent with the others. 
+
+Data_round_1 <- Data_round_1 %>%
+  # renaming "FSCQ1" through "FSCQ10" as "FSCQ.1" through "FSCQ.10"
+  rename_with(
+    .fn = ~ gsub("FSCQ(\\d+)", "FSCQ.\\1", .x),
+    .cols = starts_with("FSCQ")
+  ) %>%
+  # Renaming "RESST_1" through "RESST_21" --> Recovery.scale_1 through "Recovery.scale_21"
+  rename_with(
+    .fn = ~ gsub("^RESST_", "Recovery.scale_", .x),
+    .cols = starts_with("RESST_")
+  )
+
+# Change other random discrepancies
+Data_round_1 <- Data_round_1 %>%
+  dplyr::rename(
+    Sexual.orientation = Sexual.Orientation,
+    Sexual.orientation_4_TEXT = Sexual.Orientation_4_TEXT,
+    Discharge = Military.discharge, 
+    SBQR.time_First.Click = SBQR.Time_First.Click, 
+    SBQR.time_Last.Click = SBQR.Time_Last.Click,
+    SBQR.time_Page.Submit = SBQR.Time_Page.Submit,
+    SBQR.time_Click.Count = SBQR.Time_Click.Count, 
+    SBQR.6 = Start.Date)
+
+# rename Qs 31 through 45 as 139 through 153
+# These are the verbal questions FEEDBACK. 
+# Looks like round 1 were asked 2 extra questions which participants noted they weren't asked about originally. We'll exclude those from the dataframe after this
+start_index <- 31
+end_index <- 45
+new_start_index <- 139
+old_cols <- paste0("Q", start_index:end_index)
+new_cols <- paste0("Q", new_start_index:(new_start_index + (end_index - start_index)))
+
+Data_round_1 <- Data_round_1 %>%
+  rename_with(
+    .fn = ~ new_cols[match(.x, old_cols)],
+    .cols = matches(paste0("^", paste0("Q", start_index:end_index), "$"))
+  )
+
+# Remove 2 extra feedback questions
+Data_round_1 <- Data_round_1 %>%
+  select(-Q46, -Q47)
+
+# Now check discrepancies between dataframes again
+setdiff(colnames(Data_round_1), colnames(Data_round_2))
+setdiff(colnames(Data_round_2), colnames(Data_round_1))
+
+setdiff(colnames(Data_round_2), colnames(Data_round_3))
+setdiff(colnames(Data_round_3), colnames(Data_round_2))
+
+setdiff(colnames(Data_round_4), colnames(Data_round_3))
+setdiff(colnames(Data_round_3), colnames(Data_round_4))
+
+setdiff(colnames(Data_round_1), colnames(Data_round_4))
+setdiff(colnames(Data_round_5), colnames(Data_round_4))
+```
+
+
+```{r Raw quantitative merging}
+
+##### round 2 #####
+Round_1_2_merged <- merge(Data_round_1, Data_round_2, by = "workerID", all = TRUE)
+nrow(Data_round_1)
+nrow(Data_round_2)
+nrow(Round_1_2_merged)
+head(Round_1_2_merged)
+
+Round_1_2_merged <- Round_1_2_merged[-1, ]
+
+(common_cols <- intersect(colnames(Data_round_1)[!colnames(Data_round_1) %in% "workerID"], 
+                          colnames(Data_round_2)[!colnames(Data_round_2) %in% "workerID"]))
+
+for (col in common_cols) {
+  Round_1_2_merged[[col]] <- ifelse(!is.na(Round_1_2_merged[[paste0(col, ".x")]]),
+                                    Round_1_2_merged[[paste0(col, ".x")]],
+                                    Round_1_2_merged[[paste0(col, ".y")]])
+  # Remove original columns
+  Round_1_2_merged <- Round_1_2_merged[, -c(which(colnames(Round_1_2_merged) == paste0(col, ".x")),
+                                            which(colnames(Round_1_2_merged) == paste0(col, ".y")))]
+}
+
+colnames(Round_1_2_merged)
+
+##### round 3 #####
+Round_1_2_3_merged <- merge(Round_1_2_merged, Data_round_3, by = "workerID", all = TRUE)
+nrow(Round_1_2_3_merged)
+nrow(Round_1_2_merged)
+
+head(Round_1_2_3_merged)
+
+Round_1_2_3_merged <- Round_1_2_3_merged[-1, ]
+
+(common_cols <- intersect(colnames(Round_1_2_merged)[!colnames(Round_1_2_merged) %in% "workerID"], 
+                          colnames(Data_round_3)[!colnames(Data_round_3) %in% "workerID"]))
+
+for (col in common_cols) {
+  Round_1_2_3_merged[[col]] <- ifelse(!is.na(Round_1_2_3_merged[[paste0(col, ".x")]]),
+                                      Round_1_2_3_merged[[paste0(col, ".x")]],
+                                      Round_1_2_3_merged[[paste0(col, ".y")]])
+  
+  Round_1_2_3_merged <- Round_1_2_3_merged[, -c(which(colnames(Round_1_2_3_merged) == paste0(col, ".x")),
+                                                which(colnames(Round_1_2_3_merged) == paste0(col, ".y")))]
+}
+
+##### round 4 ####
+Round_1_2_3_4_merged <- merge(Round_1_2_3_merged, Data_round_4, by = "workerID", all = TRUE)
+nrow(Data_round_4)
+nrow(Round_1_2_3_merged)
+nrow(Round_1_2_3_4_merged)
+
+Round_1_2_3_4_merged <- Round_1_2_3_4_merged[-1, ]
+
+(common_cols <- intersect(colnames(Round_1_2_3_merged)[!colnames(Round_1_2_3_merged) %in% "workerID"], 
+                          colnames(Data_round_4)[!colnames(Data_round_4) %in% "workerID"]))
+
+for (col in common_cols) {
+  Round_1_2_3_4_merged[[col]] <- ifelse(!is.na(Round_1_2_3_4_merged[[paste0(col, ".x")]]),
+                                        Round_1_2_3_4_merged[[paste0(col, ".x")]],
+                                        Round_1_2_3_4_merged[[paste0(col, ".y")]])
+
+  Round_1_2_3_4_merged <- Round_1_2_3_4_merged[, -c(which(colnames(Round_1_2_3_4_merged) == paste0(col, ".x")),
+                                                    which(colnames(Round_1_2_3_4_merged) == paste0(col, ".y")))]
+}
+
+colnames(Round_1_2_3_4_merged)
+
+##### round 5 #####
+Round_1_2_3_4_5_merged <- merge(Round_1_2_3_4_merged, Data_round_5, by = "workerID", all = TRUE)
+nrow(Data_round_5)
+nrow(Round_1_2_3_merged)
+nrow(Round_1_2_3_4_5_merged)
+
+Round_1_2_3_4_5_merged <- Round_1_2_3_4_5_merged[-1, ]
+
+(common_cols <- intersect(colnames(Round_1_2_3_merged)[!colnames(Round_1_2_3_merged) %in% "workerID"], 
+                          colnames(Data_round_5)[!colnames(Data_round_5) %in% "workerID"]))
+
+for (col in common_cols) {
+  Round_1_2_3_4_5_merged[[col]] <- ifelse(!is.na(Round_1_2_3_4_5_merged[[paste0(col, ".x")]]),
+                                          Round_1_2_3_4_5_merged[[paste0(col, ".x")]],
+                                          Round_1_2_3_4_5_merged[[paste0(col, ".y")]])
+
+  Round_1_2_3_4_5_merged <- Round_1_2_3_4_5_merged[, -c(which(colnames(Round_1_2_3_4_5_merged) == paste0(col, ".x")),
+                                                        which(colnames(Round_1_2_3_4_5_merged) == paste0(col, ".y")))]
+}
+
+
+##### round 6 #####
+Round_1_2_3_4_5_6_merged <- merge(Round_1_2_3_4_5_merged, Data_round_6, by = "workerID", all = TRUE)
+nrow(Data_round_6)
+nrow(Round_1_2_3_merged)
+nrow(Round_1_2_3_4_5_6_merged)
+
+Round_1_2_3_4_5_6_merged <- Round_1_2_3_4_5_6_merged[-1, ]
+
+(common_cols <- intersect(colnames(Round_1_2_3_merged)[!colnames(Round_1_2_3_merged) %in% "workerID"], 
+                          colnames(Data_round_6)[!colnames(Data_round_6) %in% "workerID"]))
+
+for (col in common_cols) {
+  Round_1_2_3_4_5_6_merged[[col]] <- ifelse(!is.na(Round_1_2_3_4_5_6_merged[[paste0(col, ".x")]]),
+                                            Round_1_2_3_4_5_6_merged[[paste0(col, ".x")]],
+                                            Round_1_2_3_4_5_6_merged[[paste0(col, ".y")]])
+  
+  Round_1_2_3_4_5_6_merged <- Round_1_2_3_4_5_6_merged[, -c(which(colnames(Round_1_2_3_4_5_6_merged) == paste0(col, ".x")),
+                                                            which(colnames(Round_1_2_3_4_5_6_merged) == paste0(col, ".y")))]
+}
+
+Round_1_2_3_4_5_6_merged <- Round_1_2_3_4_5_6_merged %>%
+  rename_with(~ paste0(., "_T1"), -c(workerID))
+
+# remove averages that only round 1 had
+Round_1_2_3_4_5_6_merged <- Round_1_2_3_4_5_6_merged[, !colnames(Round_1_2_3_4_5_6_merged) 
+                                                     %in% c("X_T1", "X.1_T1", "X.2_T1", "X.3_T1", "Raw_T1")]
+
+# file_path <- file.path("Created_datasets")
+# dir.create(file_path)
+filetype <- ".csv"
+name <- paste0("Raw_merged_")
+filename <- paste(name, Sys.Date(), filetype, sep = '')
+full_filename <- file.path(file_path, filename)
+write.csv(Round_1_2_3_4_5_6_merged, file = full_filename, row.names = FALSE)
+```
+
+```{r Qualitative merging}
+# First, in EXCEL, make a function to extract URLs from hyperlinked text. 
+
+# Function URL(Hyperlink As Range)
+#  URL = Hyperlink.Hyperlinks(1).Address
+# End Function
+
+# Make new clumns with linked text (folder, transcript, etc.). Then come back to this R file, and import the formatted version:
+qual_tracker <- read.csv("Raw_data/NLP_recordings_tracker_SG_formatted.csv")
+
+# rename workerID column to be consistent with quant data
+qual_tracker <- qual_tracker %>%
+  dplyr::rename(
+    workerID = WorkerID..anonymous.)
+
+# Remove extra last 6 columns
+qual_tracker <- qual_tracker %>%
+  select(-((ncol(.)-5):ncol(.)))
+
+# Cut out extra rows
+qual_tracker <- qual_tracker[1:170, ]
+
+nrow(qual_tracker)
+View(qual_tracker)
+
+# Now, use LEFT JOIN, so all particpiants on the qual tracker are matched (but not the opposite)
+qual_quant_merged <- left_join(qual_tracker, Round_1_2_3_4_5_6_merged, by = "workerID")
+nrow(qual_quant_merged)
+head(qual_quant_merged)
+
+filetype <- ".csv"
+name <- paste0("Raw_recordings_assessment_data_")
+filename <- paste(name, Sys.Date(), filetype, sep = '')
+full_filename <- file.path(file_path, filename)
+write.csv(qual_quant_merged, file = full_filename, row.names = FALSE)
+```
+
