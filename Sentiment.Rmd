@@ -636,12 +636,13 @@ transcripts <- transcripts %>%
          ))
 
 transcripts # Confirm. Good
+head(transcripts)
 ```
 
 ```{r Group sentiment}
 tidy_transcripts <- transcripts %>%
   unnest_tokens(word, text) %>%
-  anti_join(stop_words_df, by = "word")
+  anti_join(stop_words, by = "word")
 
 # Word Frequency s
 (word_freq <- tidy_transcripts %>%
@@ -762,6 +763,86 @@ average_sentiment_bing_long <- average_sentiment_bing %>%
 (ggplot(average_sentiment_bing_long, aes(x = sentiment, y = average_score, fill = group)) +
   geom_col(position = "dodge") +
   labs(x = "Sentiment", y = "Average Score", title = "Average sentiment by group (bing)") +
+  theme_minimal() +
+  theme(
+    panel.grid.major = element_line(color = "grey"),
+    panel.grid.minor = element_line(color = "grey"),
+    panel.background = element_rect(fill = "white"),
+    plot.background = element_rect(fill = "white")
+  ))
+
+```
+
+```{r group bigrams}
+# Checking out negation words by group
+combined_text <- transcripts %>%
+  group_by(group) %>%
+  summarize(text = paste(text, collapse = " "), .groups = 'drop')
+
+text_df <- combined_text %>%
+  group_by(group) %>%
+  summarize(text = paste(text, collapse = " "), .groups = 'drop')
+
+# Bigrams
+text_data_bigrams <- text_df %>%
+  unnest_tokens(bigram, text, token = "ngrams", n = 2) %>%
+  filter(!is.na(bigram))
+
+# Separate into two words
+bigrams_separated <- text_data_bigrams %>%
+  separate(bigram, c("word1", "word2"), sep = " ")
+
+# negation words
+negation_words <- c("not", "no", "never", "without")
+
+# isolate to bigrams where the first word is a negation 
+negation_bigrams <- bigrams_separated %>%
+  filter(word1 %in% negation_words)
+
+# sentiment analysis on the second word using AFINN 
+afinn_sentiments <- get_sentiments("afinn")
+
+# Join AFINN sentiments and counts
+negation_sentiment_words <- negation_bigrams %>%
+  inner_join(afinn_sentiments, by = c("word2" = "word")) %>%
+  count(group, word1, word2, value, sort = TRUE)
+
+(negation_sentiment_plot_afinn <- negation_sentiment_words %>%
+  group_by(group, word1) %>%
+  slice_max(n, n = 10) %>%
+  ungroup() %>%
+  mutate(word2 = reorder_within(word2, n, group)) %>%
+  ggplot(aes(n, word2, fill = as.factor(value))) +
+  geom_col(show.legend = FALSE) +
+  facet_wrap(~ group + word1, scales = "free_y") +
+  labs(x = "Frequency", y = NULL, title = "Top words following negation words by group") +
+  scale_y_reordered() +
+  theme_minimal() +
+  theme(
+    panel.grid.major = element_line(color = "grey"),
+    panel.grid.minor = element_line(color = "grey"),
+    panel.background = element_rect(fill = "white"),
+    plot.background = element_rect(fill = "white")
+  ))
+
+# sentiment analysis on second word using nrc
+nrc_lexicon <- lexicon_nrc()
+
+# Join nrc sentiments and counts
+negation_sentiment_words <- negation_bigrams %>%
+  inner_join(nrc_lexicon, by = c("word2" = "word")) %>%
+  count(group, word1, word2, sentiment, sort = TRUE)
+
+(negation_sentiment_plot_nrc <- negation_sentiment_words %>%
+  group_by(group, word1) %>%
+  slice_max(n, n = 10) %>%
+  ungroup() %>%
+  mutate(word2 = reorder_within(word2, n, group)) %>%
+  ggplot(aes(n, word2, fill = sentiment)) +
+  geom_col(show.legend = FALSE) +
+  facet_wrap(~ group + word1, scales = "free_y") +
+  labs(x = "Frequency", y = NULL, title = "Top words following negation words by group") +
+  scale_y_reordered() +
   theme_minimal() +
   theme(
     panel.grid.major = element_line(color = "grey"),

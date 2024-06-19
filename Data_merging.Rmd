@@ -164,7 +164,7 @@ nrow(Round_1_2_3_4_5_merged)
 
 Round_1_2_3_4_5_merged <- Round_1_2_3_4_5_merged[-1, ]
 
-(common_cols <- intersect(colnames(Round_1_2_3_merged)[!colnames(Round_1_2_3_merged) %in% "workerID"], 
+(common_cols <- intersect(colnames(Round_1_2_3_4_merged)[!colnames(Round_1_2_3_4_merged) %in% "workerID"], 
                           colnames(Data_round_5)[!colnames(Data_round_5) %in% "workerID"]))
 
 for (col in common_cols) {
@@ -185,7 +185,7 @@ nrow(Round_1_2_3_4_5_6_merged)
 
 Round_1_2_3_4_5_6_merged <- Round_1_2_3_4_5_6_merged[-1, ]
 
-(common_cols <- intersect(colnames(Round_1_2_3_merged)[!colnames(Round_1_2_3_merged) %in% "workerID"], 
+(common_cols <- intersect(colnames(Round_1_2_3_4_5_merged)[!colnames(Round_1_2_3_4_5_merged) %in% "workerID"], 
                           colnames(Data_round_6)[!colnames(Data_round_6) %in% "workerID"]))
 
 for (col in common_cols) {
