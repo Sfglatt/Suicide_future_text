@@ -250,3 +250,221 @@ full_filename <- file.path(file_path, filename)
 write.csv(qual_quant_merged, file = full_filename, row.names = FALSE)
 ```
 
+```{r Misc. coding}
+
+# Import data if not loaded from above:
+Merged_data <- read.csv("Created_datasets/Raw_recordings_assessment_data_2024-06-18.csv")
+
+colnames(Merged_data)
+
+#### Recovery Evaluation and Suicide Support Tool ####
+
+Merged_data <- Merged_data %>%
+  mutate(across(starts_with("Recovery.scale"), 
+                ~ recode(., 
+                         "Does not describe me" = 1, 
+                         "Describes me slightly well" = 2, 
+                         "Describes me moderately well" = 3, 
+                         "Describes me very well" = 4, 
+                         "Describes me extremely well" = 5, 
+                         .default = as.numeric(.)), 
+                .names = "{.col}_recode")) # creating new columns with recoded values 
+
+# RESST subscales and total scores
+Merged_data <- Merged_data %>%
+  mutate(
+    RESST_self_worth = rowMeans(select(., 
+                                       c("Recovery.scale_1_T1_recode", "Recovery.scale_2_T1_recode",
+                                         "Recovery.scale_3_T1_recode", "Recovery.scale_4_T1_recode",
+                                         "Recovery.scale_5_T1_recode", "Recovery.scale_6_T1_recode",
+                                         "Recovery.scale_7_T1_recode")), na.rm = FALSE),
+    RESST_life_worth = rowMeans(select(., 
+                                       c("Recovery.scale_8_T1_recode", "Recovery.scale_9_T1_recode",
+                                         "Recovery.scale_10_T1_recode", "Recovery.scale_11_T1_recode")), na.rm = FALSE),
+    RESST_social_worth = rowMeans(select(., 
+                                          c("Recovery.scale_12_T1_recode", "Recovery.scale_13_T1_recode",
+                                            "Recovery.scale_14_T1_recode", "Recovery.scale_15_T1_recode",
+                                            "Recovery.scale_16_T1_recode", "Recovery.scale_17_T1_recode")), na.rm = FALSE),
+    RESST_self_understanding = rowMeans(select(., 
+                                                c("Recovery.scale_18_T1_recode", "Recovery.scale_19_T1_recode",
+                                                  "Recovery.scale_20_T1_recode", "Recovery.scale_21_T1_recode")), na.rm = FALSE),
+    RESST_all = rowMeans(select(., 
+                                  c("Recovery.scale_1_T1_recode", "Recovery.scale_2_T1_recode",
+                                    "Recovery.scale_3_T1_recode", "Recovery.scale_4_T1_recode",
+                                    "Recovery.scale_5_T1_recode", "Recovery.scale_6_T1_recode",
+                                    "Recovery.scale_7_T1_recode", "Recovery.scale_8_T1_recode",
+                                    "Recovery.scale_9_T1_recode", "Recovery.scale_10_T1_recode",
+                                    "Recovery.scale_11_T1_recode", "Recovery.scale_12_T1_recode",
+                                    "Recovery.scale_13_T1_recode", "Recovery.scale_14_T1_recode",
+                                    "Recovery.scale_15_T1_recode", "Recovery.scale_16_T1_recode",
+                                    "Recovery.scale_17_T1_recode", "Recovery.scale_18_T1_recode",
+                                    "Recovery.scale_19_T1_recode", "Recovery.scale_20_T1_recode",
+                                    "Recovery.scale_21_T1_recode")), na.rm = FALSE)
+  )
+
+#### Satisfaction with Life Scale ####
+
+# the scale has 7 options: Strongly agree (7), agree (6), slightly agree (5), neither agree nor disagree (4), slightly disagree (3), disagree (2), strongly disagree (1). However, here it was administered with 5. 
+
+Merged_data <- Merged_data %>%
+  mutate(across(all_of(paste0("SWLS_", 1:5, "_T1")), 
+                ~ recode(trimws(.), 
+                         "Strongly agree" = 5, 
+                         "Somewhat agree" = 4, 
+                         "Neither agree nor disagree" = 3, 
+                         "Somewhat disagree" = 2, 
+                         "Strongly disagree" = 1, 
+                         .default = as.numeric(.)), 
+                .names = "{.col}_recode"))
+
+# total score
+Merged_data <- Merged_data %>%
+  mutate(
+    SWLS_total = rowSums(select(., 
+                                 c("SWLS_1_T1_recode", "SWLS_2_T1_recode", "SWLS_3_T1_recode", "SWLS_4_T1_recode", "SWLS_5_T1_recode")), 
+                          na.rm = FALSE))
+
+#### Suicidal Behaviors Questionnaire-Revised ####
+Merged_data <- Merged_data %>%
+  mutate(SBQR.2_T1_recode = case_when( # item one
+    trimws(SBQR.2_T1) == "Never" ~ "1",
+    trimws(SBQR.2_T1) == "It was just a brief passing thought" ~ "2",
+    trimws(SBQR.2_T1) == "I have had a plan to kill myself at least once but did not try to do it" ~ "3",
+                          # the original wording is "at least once to kill myself" - slightly different here
+    trimws(SBQR.2_T1) == "I have had a plan at least once to kill myself and really wanted to die" ~ "4",
+    trimws(SBQR.2_T1) == "I have attempted to kill myself but did not want to die" ~ "5",
+    trimws(SBQR.2_T1) == "I have attempted to kill myself, and really hoped to die" ~ "6",
+    TRUE ~ as.character(SBQR.2_T1)  # keep other values unchanged
+  ))
+
+# score item 1 in line with SBQ-R scoring
+Merged_data <- Merged_data %>%
+  mutate(
+    SBQR.2_T1_recode = as.numeric(SBQR.2_T1_recode),  
+    SBQR.2_T1_recode_score = case_when(
+      SBQR.2_T1_recode %in% c(3, 4) ~ 3,
+      SBQR.2_T1_recode %in% c(5, 6) ~ 4, 
+      TRUE ~ SBQR.2_T1_recode  # Keep other values unchanged so 1 = 1 and 2 = 2 in line with SBQ-R scoring
+    )
+  )
+
+Merged_data <- Merged_data %>%
+  mutate(SBQR.4_T1_recode = case_when( # item two
+    trimws(SBQR.4_T1) == "Never" ~ "1",
+    trimws(SBQR.4_T1) == "Rarely (1 time)" ~ "2",
+    trimws(SBQR.4_T1) == "Sometimes (2 times)" ~ "3",
+    trimws(SBQR.4_T1) == "Often (3-4 times)" ~ "4",
+    trimws(SBQR.4_T1) == "Very Often (5 or more times)" ~ "5",
+    TRUE ~ as.character(SBQR.4_T1)  
+  ))
+
+table(Merged_data$SBQR.5_T1)
+Merged_data <- Merged_data %>%
+  mutate(SBQR.5_T1_recode = case_when( # item three
+    trimws(SBQR.5_T1) == "No" ~ "1",
+    trimws(SBQR.5_T1) == "Yes, at one time, but did not really want to do it" ~ "2", # should be "want to die", not "do it"
+    trimws(SBQR.5_T1) == "Yes, at one time, and really wanted to die" ~ "3",
+    trimws(SBQR.5_T1) == "Yes, more than once, but did not want to do it" ~ "4",
+    trimws(SBQR.5_T1) == "Yes, more than once, and really wanted to do it" ~ "5",
+    TRUE ~ as.character(SBQR.5_T1)  
+  ))
+
+# score item 3 in line with SBQ-R scoring
+Merged_data <- Merged_data %>%
+  mutate(
+    SBQR.5_T1_recode = as.numeric(SBQR.5_T1_recode),  
+    SBQR.5_T1_recode_score = case_when(
+      SBQR.5_T1_recode %in% c(2, 3) ~ 2,
+      SBQR.5_T1_recode %in% c(4, 5) ~ 3, 
+      TRUE ~ SBQR.5_T1_recode # Keep other values unchanged so 1 = 1 in line with SBQ-R scoring
+    )
+  )
+
+Merged_data <- Merged_data %>%
+  mutate(SBQR.6_T1_recode = case_when( # item four
+    trimws(SBQR.6_T1) == "Never" ~ "0",
+    trimws(SBQR.6_T1) == "No chance at all" ~ "1",
+    trimws(SBQR.6_T1) == "Rather Unlikely" ~ "2",
+    trimws(SBQR.6_T1) == "Unlikely" ~ "3",
+    trimws(SBQR.6_T1) == "Likely" ~ "4",
+    trimws(SBQR.6_T1) == "Rather Likely" ~ "5",
+        trimws(SBQR.6_T1) == "Very Likely" ~ "6",
+    TRUE ~ as.character(SBQR.6_T1)  
+  ))
+
+# SBQ-R total score
+Merged_data <- Merged_data %>%
+  mutate(
+    SBQR.2_T1_recode_score = as.numeric(SBQR.2_T1_recode_score),
+    SBQR.4_T1_recode = as.numeric(SBQR.4_T1_recode),
+    SBQR.5_T1_recode_score = as.numeric(SBQR.5_T1_recode_score),
+    SBQR.6_T1_recode = as.numeric(SBQR.6_T1_recode)
+  ) %>%
+  mutate(
+    SBQR_total = rowSums(select(., c(SBQR.2_T1_recode_score, # recoded item 1
+                                     SBQR.4_T1_recode,       # item 2
+                                     SBQR.5_T1_recode_score, # recoded item 3
+                                     SBQR.6_T1_recode)),     # recoded item 4
+                         na.rm = FALSE)
+  )
+   
+summary(Merged_data$SBQR_total)
+
+#### Future self Continuity Questionnaire ####
+
+# Similarity items
+Merged_data <- Merged_data %>%
+  mutate(
+    across(
+      FSCQ.1_T1:FSCQ.4_T1,
+      as.character
+    )
+  ) %>%
+  mutate(
+    across(
+      FSCQ.1_T1:FSCQ.4_T1,
+      ~ case_when(
+        trimws(.) == "Completely different" ~ "1",
+        trimws(.) == "Somewhat different" ~ "2",
+        trimws(.) == "A little different" ~ "3",
+        trimws(.) == "Similar" ~ "4",
+        trimws(.) == "Very similar" ~ "5",
+        trimws(.) == "Exactly the same" ~ "6",
+        TRUE ~ as.character(.)
+      ),
+      .names = "{.col}_recode"
+    )
+  )
+
+# Vividness and Positive items
+Merged_data <- Merged_data %>%
+  mutate(
+    across(
+      FSCQ.5_T1:FSCQ.10_T1,
+      as.character
+    )
+  ) %>%
+  mutate(
+    across(
+      FSCQ.5_T1:FSCQ.10_T1,
+      ~ case_when(
+        trimws(.) == "Not at all" ~ "1",
+        trimws(.) == "Not very well" ~ "2",
+        trimws(.) == "Somewhat" ~ "3",
+        trimws(.) == "Pretty well" ~ "4",
+        trimws(.) == "Very Strongly" ~ "5",
+        trimws(.) == "Very strongly" ~ "5", # some surveys had different cases
+        trimws(.) == "Perfectly" ~ "6",
+        TRUE ~ as.character(.)
+      ),
+      .names = "{.col}_recode"
+    )
+  ) %>%
+  mutate(
+    across(
+      matches("^FSCQ\\.[1-9]|10_T1$"),  
+      ~ na_if(., "")  
+    )
+  )
+```
+
