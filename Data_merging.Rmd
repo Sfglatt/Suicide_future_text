@@ -408,7 +408,19 @@ Merged_data <- Merged_data %>%
                          na.rm = FALSE)
   )
    
-summary(Merged_data$SBQR_total)
+table(Merged_data$SBQR.2_T1_recode_score)
+
+# SBQ-R risk
+Merged_data <- Merged_data %>%
+  mutate(
+    SBQR_risk = case_when(
+      is.na(SBQR_total) ~ NA_real_,  # Keep NA as NA
+      SBQR_total >= 7 ~ 1,           # Values 7 and higher become 1
+      SBQR_total <= 6 ~ 0            # Values 6 and lower become 0
+    )
+  )
+
+summary(Merged_data$SBQR.6_T1_recode)
 
 #### Future self Continuity Questionnaire ####
 
@@ -466,5 +478,18 @@ Merged_data <- Merged_data %>%
       ~ na_if(., "")  
     )
   )
+
+#### Save dataset ####
+
+filetype <- ".csv"
+name <- paste0("Raw_recordings_assessment_recoded_data_")
+file_path <- "Created_datasets"
+filename <- paste(name, Sys.Date(), filetype, sep = '')
+full_filename <- file.path(file_path, filename)
+write.csv(Merged_data, file = full_filename, row.names = FALSE)
+```
+
+```{r}
+
 ```
 

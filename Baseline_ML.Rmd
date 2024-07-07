@@ -1,0 +1,107 @@
+---
+title: "Baseline_ML"
+output: github_document
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+
+if (!require("caret")) {install.packages("caret"); require("caret")}
+if (!require("foreign")) {install.packages("foreign"); require("foreign")}
+if (!require("haven")) {install.packages("haven"); require("haven")}
+if (!require("GGally")) {install.packages("GGally"); require("GGally")}
+if (!require("ggcorrplot")) {install.packages("ggcorrplot"); require("ggcorrplot")}
+if (!require("glmnet")) {install.packages("glmnet"); require("glmnet")}
+if (!require("janitor")) {install.packages("janitor"); require("janitor")}
+if (!require("pROC")) {install.packages("pROC"); require("pROC")} 
+if (!require("ROCR")) {install.packages("ROCR"); require("ROCR")} 
+if (!require("tidyverse")) {install.packages("tidyverse"); require("tidyverse")} 
+```
+
+```{r Data}
+# Use cleaned dataset from "Data_merging"
+Baseline_data <- read.csv("Created_datasets/Raw_recordings_assessment_recoded_data_2024-07-07.csv")
+```
+
+```{r Prepare for LASSO}
+
+set.seed(123456)
+
+# remove NAs on outcome variable
+Baseline_data <- Baseline_data %>%
+  filter(!is.na(SBQR_risk))
+
+# Make outcome a factor
+Baseline_data <- Baseline_data %>%
+  mutate(SBQR_risk_factor = factor(SBQR_risk))
+
+# Choose variables for prediction
+Isolated_data <- Baseline_data %>%
+  select(SBQR_risk_factor, 
+         FSCQ.1_T1_recode, FSCQ.5_T1_recode, FSCQ.10_T1_recode,
+         RESST_self_worth, RESST_life_worth, RESST_social_worth, RESST_self_understanding)
+
+# Split the data into training and test set
+train_sample = Isolated_data$SBQR_risk_factor %>% 
+  createDataPartition(p = 0.8, list = FALSE)
+
+train = Isolated_data[train_sample, ]
+test = Isolated_data[-train_sample, ]
+
+# Dumy code categorical predictor variables
+#  model.matrix() helps to create the matrix of predictors and also automatically converts categorical predictors to appropriate dummy variables, which is required for the glmnet() function. 
+## only run if outcome is NOT binary
+
+x = model.matrix(SBQR_risk_factor ~ ., train)[,-1]
+
+# Convert the outcome (class) to a numerical variable
+y = as.numeric(train$SBQR_risk_factor)
+```
+
+```{r lasso penalized regression model}
+set.seed(123456) 
+
+# Find the optimal value of lambda that minimizes the cross-validation error
+# The plot displays the cross-validation error according to the log of lambda. The left dashed vertical line shows that the log of the optimal value of lambda, which is the one that minimizes the prediction error. This lambda value will give the most accurate model
+
+cv_lasso = cv.glmnet(x, y, alpha = 1, family = "binomial")
+plot(cv_lasso)
+cv_lasso$lambda.min 
+
+# Using lambda.min as the best lambda gives the following regression coefficients
+coef(cv_lasso, cv_lasso$lambda.min)
+# Using lambda.1se as the best lambda gives the following regression coefficients
+coef(cv_lasso, cv_lasso$lambda.1se)
+
+# Fit the final model on training set
+model = glmnet(x, y, alpha = 1, family = "binomial", lambda = cv_lasso$lambda.min) # Setting lambda = lambda.1se produces a simpler model compared to lambda.min, but the model might be less accurate than the model fit with lambda.min.
+
+# Model rregression coefficients
+coef(model)
+
+# Predictions on the test data
+x_test = model.matrix(SBQR_risk_factor ~ ., test)[,-1]
+(probabilities = model %>% predict(newx = x_test))
+(predicted.classes = ifelse(probabilities > 0.5, "1", "0"))
+
+# Model accuracy
+observed.classes = test$SBQR_risk_factor
+mean(predicted.classes == observed.classes) # 0.6969697
+```
+
+```{r Prediction - curves}
+# confusion matrix
+confusionMatrix(table(predicted.classes, observed.classes))
+
+# ROC curve
+a = as.data.frame(observed.classes)
+(pred = prediction(probabilities, a))
+(perf = performance(pred, 'tpr', 'fpr'))
+plot_auc = plot(perf)
+# ggsave("auc.png", plot_auc, dpi = 350)
+
+roc_obj <- roc(observed.classes, probabilities)
+plot(roc_obj, main = "ROC Curve", col = "blue")
+
+(AUC = performance(pred, 'auc'))
+```
