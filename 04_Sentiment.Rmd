@@ -1,12 +1,7 @@
 ---
-title: "Prelim text sentiment analysis"
+title: "04_Sentiment"
 output: html_notebook
 ---
-
-```{r Github}
-# usethis::create_from_github("https://github.com/Sfglatt/Suicide_future_text.git",
-#                            destdir = "Github/Suicide_text")
-```
 
 ```{r Packages}
 if (!require("dplyr")) {install.packages("dplyr"); require("dplyr")}
@@ -29,6 +24,8 @@ if (!require("readr")) {install.packages("readr"); require("readr")}
 if (!require("reshape2")) {install.packages("reshape2"); require("reshape2")}
 if (!require("widyr")) {install.packages("widyr"); require("widyr")}
 if (!require("wordcloud")) {install.packages("wordcloud"); require("wordcloud")}
+
+# https://books.psychstat.org/textmining/topic-models.html
 ```
 
 ```{r Functions}
@@ -87,14 +84,6 @@ embed_word <- function(word_a) {
 }
 ```
 
-```{r Set up}
-# set the participant ID name and file path for all forthcoming files per participant
-id_name = "P2" 
-
-file_path <- file.path("Data", id_name)
-dir.create(file_path)
-```
-
 ```{r OpenAI, eval = FALSE}
 Sys.setenv(OPENAI_API_KEY = 'my_key')
 
@@ -112,9 +101,18 @@ read_docx() |>
   print(target = transcript_file)
 ```
 
+```{r Set up}
+# set the participant ID name and file path for all forthcoming files per participant
+id_name = "P161" 
+
+file_path <- file.path("Example_data", id_name)
+dir.create(file_path)
+```
+
 ```{r Data}
 # Import transcript
-Transcript_doc <- read_docx("Transcripts/P2_Transcript.docx")
+path <- paste0("Transcripts/", id_name, "_Transcript.docx")
+Transcript_doc <- read_docx(path)
 
 # Extract text 
 text_data <- docx_summary(Transcript_doc) %>%
@@ -258,9 +256,9 @@ tidy_text %>%
 
 # Save the descriptive sentiment visualization
 # This will automatically append the right participant ID (set above) and save to that ID's folder
-dir.create(file.path("Data", id_name), showWarnings = FALSE, recursive = TRUE)
-file_path_nrc <- file.path("Data", id_name, paste0(id_name, "_sentiment_fig_nrc.png"))
-file_path_bing <- file.path("Data", id_name, paste0(id_name, "_sentiment_fig_bing.png"))
+dir.create(file.path("Example_data", id_name), showWarnings = FALSE, recursive = TRUE)
+file_path_nrc <- file.path("Example_data", id_name, paste0(id_name, "_sentiment_fig_nrc.png"))
+file_path_bing <- file.path("Example_data", id_name, paste0(id_name, "_sentiment_fig_bing.png"))
 ggsave(nrc_plot, filename = file_path_nrc)
 ggsave(bing_plot, filename = file_path_bing)
 ```
@@ -353,7 +351,7 @@ all_dictionaries <- bind_rows(afinn_tidy,
   facet_wrap(~method, ncol = 1, scales = "free_y") +
   ggtitle("Sentiment over chunks of text with different lexicons"))
 
-file_path_sentiment_chunks <- file.path("Data", id_name, paste0(id_name, "_sentiment_fig_chunks.png"))
+file_path_sentiment_chunks <- file.path("Example_data", id_name, paste0(id_name, "_sentiment_fig_chunks.png"))
 ggsave(sentiment_chunks_plot, filename = file_path_sentiment_chunks)
 ```
 
@@ -376,7 +374,7 @@ tidy_text %>%
   comparison.cloud(colors = c("#666666", "#009999"),
                    max.words = 100)
 
-file_path_bing <- file.path("Data", id_name, paste0(id_name, "_wordcloud_bing.png"))
+file_path_bing <- file.path("Example_data", id_name, paste0(id_name, "_wordcloud_bing.png"))
 png(filename = file_path_bing)
 tidy_text %>%
   anti_join(stop_words_df) %>% # if you want to filter out stop words
@@ -626,7 +624,7 @@ docs_path <- "Transcripts"
 transcripts <- readtext(paste0(docs_path, "/*.docx"))
 transcripts
 
-# add suicidal identifier. I'm programming that IDs under 95 are suicidal and IDs 95 and higher are non-suicidal. This will make a 'group' variable with this information:
+# add suicidal identifier.
 transcripts <- transcripts %>%
   mutate(participant_id = tools::file_path_sans_ext(basename(doc_id)),
          group = case_when(
@@ -644,9 +642,15 @@ tidy_transcripts <- transcripts %>%
   unnest_tokens(word, text) %>%
   anti_join(stop_words, by = "word")
 
-# Word Frequency s
+# Word Frequencys
 (word_freq <- tidy_transcripts %>%
   count(group, word, sort = TRUE))
+
+# word pairs
+(word_pairs <- tidy_transcripts %>%
+  pairwise_count(word, group, sort = TRUE))
+
+word_pairs %>% filter(item1 == "future")
 
 # Sentiment
 # bing
@@ -656,6 +660,12 @@ tidy_transcripts <- transcripts %>%
   spread(sentiment, n, fill = 0) %>%
   mutate(sentiment = positive - negative))
 # Don't forget that this will change based on how *many* people are in each group! e.g., I currently have 2 non-suicidal and 7 suicidal, so since sentiment is based on counts, it will be skewed. 
+
+# bing word counts
+bing_word_counts <- tidy_transcripts %>%
+  inner_join(get_sentiments("bing"), by = "word") %>%
+  count(group, word, sentiment, sort = TRUE) %>%
+  ungroup()
 
 # Bing plot
 (bing_plot <- bing_word_counts %>%

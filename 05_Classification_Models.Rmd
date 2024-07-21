@@ -1,5 +1,5 @@
 ---
-title: "Prediction"
+title: "05_Classification_Models"
 output: html_notebook
 ---
 
@@ -16,10 +16,11 @@ if (!require("tidymodels")) {install.packages("tidymodels"); require("tidymodels
 if (!require("tidytext")) {install.packages("tidytext"); require("tidytext")}
 if (!require("tidyverse")) {install.packages("tidyverse"); require("tidyverse")}
 if (!require("vip")) {install.packages("vip"); require("vip")}
+# https://bookdown.org/tianyuan09/ai4ph2022/
 ```
 
 ```{r Data}
-# Use 'transcripts' from the text processing / sentiment file. This has participants' transcripts and suicide risk status. 
+# Use 'transcripts' from file 04. This has participants' transcripts and suicide risk status. 
 
 # Prepare the data
 
@@ -44,7 +45,7 @@ tidy_text_stop_stem %>% group_by(word) %>%
   head(10)
 # life, future, family
 
-tidy_text_stem_stop %>% group_by(stem) %>% 
+tidy_text_stop_stem %>% group_by(stem) %>% 
   summarise(count = n()) %>% 
   arrange(desc(count)) %>% 
   head(10)
@@ -148,13 +149,6 @@ lasso_fit <- workflow() %>%
 # Create a 3-fold cross-validation set
 set.seed(123456)
 (transcript_folds <- vfold_cv(transcript_df_train, v = 3))
-## #  3-fold cross-validation 
-## # A tibble: 3 × 2
-##   splits              id   
-##   <list>              <chr>
-## 1 <split [2785/1393]> Fold1
-## 2 <split [2785/1393]> Fold2
-## 3 <split [2786/1392]> Fold3
 
 # Revise workflow for Lasso model
 lasso_wf <- workflow() %>%
@@ -194,7 +188,7 @@ lasso_rs_metrics
 # plot ROC curve
 lasso_rs_predictions %>%
   group_by(id) %>%
-  roc_curve(truth = group, .pred_1, event_level = "second") %>%
+  roc_curve(truth = group, .pred_suicidal, event_level = "second") %>%
   autoplot() +
   labs(
     color = NULL,
@@ -206,7 +200,7 @@ lasso_rs_predictions %>%
 # Plot precision-recall curve
 lasso_rs_predictions %>%
   group_by(id) %>%
-  pr_curve(truth = group, .pred_1, event_level = "second") %>%
+  pr_curve(truth = group, .pred_suicidal, event_level = "second") %>%
   autoplot()+
   labs(
     color = NULL,
@@ -223,10 +217,11 @@ lasso_up_rs_metrics <- collect_metrics(lasso_upsample_rs)
 lasso_up_rs_predictions <- collect_predictions(lasso_upsample_rs)
 lasso_up_rs_metrics
 
+head(lasso_up_rs_predictions)
 # Plot ROC curve
 lasso_up_rs_predictions %>%
   group_by(id) %>%
-  roc_curve(truth = group, .pred_1, event_level = "second") %>%
+  roc_curve(truth = group, .pred_suicidal, event_level = "second") %>%
   autoplot() +
   labs(
     color = NULL,
@@ -237,14 +232,13 @@ lasso_up_rs_predictions %>%
 # Plot precision-recall curve
 lasso_up_rs_predictions %>%
   group_by(id) %>%
-  pr_curve(truth = group, .pred_1, event_level = "second") %>%
+  pr_curve(truth = group, .pred_suicidal, event_level = "second") %>%
   autoplot()+
   labs(
     color = NULL,
     title = "Precision Recall (lasso, upsampling)",
     subtitle = "Each resample fold is shown in a different color"
   )
-
 
 # Visualize the confusion matrix
 conf_mat_resampled(lasso_upsample_rs, tidy = FALSE) %>%
@@ -254,26 +248,31 @@ conf_mat_resampled(lasso_upsample_rs, tidy = FALSE) %>%
 ```{r Compare classification model to null model}
 # Assess our classification model by comparing its performance with a “null” baseline model.
 
-null_classification <- null_model() %>%
+(null_classification <- null_model() %>%
   set_engine("parsnip") %>%
-  set_mode("classification")
+  set_mode("classification"))
 
-null_rs <- workflow() %>%
+(null_rs <- workflow() %>%
   add_recipe(transcript_rec) %>%
   add_model(null_classification) %>%
   fit_resamples(
     transcript_folds,control = control_resamples(save_pred = TRUE)
-  )
+  ))
 
 # Pull metrics for null model
 null_rs %>%
   collect_metrics()
 
+
+# Collect predictions and inspect the dataframe
+null_predictions <- null_rs %>%
+  collect_predictions()
+
 # Plot ROC curve for null model
 null_rs %>%
   collect_predictions() %>%
   group_by(id) %>%
-  roc_curve(truth = group, .pred_1, event_level = "second") %>%
+  roc_curve(truth = group, .pred_suicidal, event_level = "second") %>%
   autoplot() +
   labs(
     color = NULL,
@@ -291,7 +290,7 @@ collect_metrics(final_wf)
 
 # Plot the ROC curve
 collect_predictions(final_wf)  %>%
-  roc_curve(truth = group, .pred_1, event_level = "second") %>%
+  roc_curve(truth = group, .pred_suicidal, event_level = "second") %>%
   autoplot() +
   labs(
     color = NULL,
@@ -303,6 +302,7 @@ collect_predictions(final_wf)  %>%
 collect_predictions(final_wf) %>%
   conf_mat(truth = group, estimate = .pred_class) %>%
   autoplot(type = "heatmap")
+
 ```
 
 ```{r Most important features in classifying}
@@ -312,9 +312,9 @@ tidymodels_prefer()
 final_imp <- extract_fit_parsnip(final_wf$.workflow[[1]]) %>%
   vip::vi()
 
-final_imp%>%filter(Sign == "POS") %>% arrange(desc(Importance)) %>% head(10)
+final_imp %>% filter(Sign == "POS") %>% arrange(desc(Importance)) %>% head(10)
 
-final_imp %>%
+final_importance <- final_imp %>%
   mutate(
     Sign = case_when(Sign == "POS" ~ "More about suicide risk",
                      Sign == "NEG" ~ "Less about suicide risk"),
@@ -333,8 +333,16 @@ final_imp %>%
   labs(
     y = NULL,
     title = "Variable importance for predicting suicide risk",
-    subtitle = paste0("These features are the most important in predicting\n",
-                      "whether descriptions of the future self are from people at risk or not")
+    subtitle = paste0("Most important predicting whether descriptions of the future self are from people at risk or not")
   )
+final_importance
+#pdf("Example_data/Group_example/Predictive_words_group.pdf", height = 15, width = 15)
+#final_importance
+#dev.off()
+```
+
+# Random Forest
+```{r}
+# https://bookdown.org/paul/computational_social_science/lab-random-forest-for-text-classification.html
 ```
 
