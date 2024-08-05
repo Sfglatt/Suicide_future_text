@@ -8,6 +8,7 @@ if (!require("dplyr")) {install.packages("dplyr"); require("dplyr")}
 if (!require("igraph")) {install.packages("igraph"); require("igraph")}
 if (!require("ggraph")) {install.packages("ggraph"); require("ggraph")}
 if (!require("ggplot2")) {install.packages("ggplot2"); require("ggplot2")}
+if (!require("lsa")) {install.packages("lsa"); require("lsa")}
 if (!require("Matrix")) {install.packages("Matrix"); require("Matrix")}
 if (!require("officer")) {install.packages("officer"); require("officer")}
 if (!require("openai")) {install.packages("openai"); require("openai")}
@@ -15,6 +16,7 @@ if (!require("readtext")) {install.packages("readtext"); require("readtext")}
 if (!require("spacyr")) {install.packages("spacyr"); require("spacyr")}
 if (!require("text")) {install.packages("text"); require("text")}
 if (!require("textdata")) {install.packages("textdata"); require("textdata")}
+if (!require("text2vec")) {install.packages("text2vec"); require("text2vec")}
 if (!require("tidyverse")) {install.packages("tidyverse"); require("tidyverse")}
 if (!require("tidytext")) {install.packages("tidytext"); require("tidytext")}
 if (!require("tm")) {install.packages("tm"); require("tm")}
@@ -172,21 +174,19 @@ tidy_text %>%
 ```{r Sentiment}
 # Look at sentiment descriptives 
 
-tidytext::get_sentiments("afinn") # 1
+tidytext::get_sentiments("afinn") 
 AFINN <- get_sentiments("afinn")
 
 tidytext::get_sentiments("bing") 
-
 get_sentiments("bing") %>% 
   count(sentiment)
 
-tidytext::get_sentiments("nrc")   # 1
-
+tidytext::get_sentiments("nrc") 
 get_sentiments("nrc") %>% 
   filter(sentiment %in% c("positive", "negative")) %>% 
   count(sentiment)
 
-# Example - look at positive words in this participants transcript
+# Example - look at positive words in this participants transcript with NRC
 nrc_positive <- get_sentiments("nrc") %>% 
   filter(sentiment == "positive")
 
@@ -201,6 +201,24 @@ nrc_negative <- get_sentiments("nrc") %>%
 
 tidy_text %>%
   inner_join(nrc_negative) %>%
+  count(word, sort = TRUE)
+# far less instances
+
+# Example - look at positive words in this participants transcript with bing
+bing_positive <- get_sentiments("bing") %>% 
+  filter(sentiment == "positive")
+
+tidy_text %>%
+  inner_join(bing_positive) %>%
+  count(word, sort = TRUE)
+# Love, hope, daughter
+
+# Now look at negative
+bing_negative <- get_sentiments("bing") %>% 
+  filter(sentiment == "negative")
+
+tidy_text %>%
+  inner_join(bing_negative) %>%
   count(word, sort = TRUE)
 # far less instances
 
@@ -220,7 +238,7 @@ tidy_text %>%
   ggplot(aes(n, word, fill = sentiment)) +
   geom_col(show.legend = FALSE) +
   facet_wrap(~sentiment, scales = "free_y") +
-  labs(x = "Contribution to sentiment",
+  labs(x = "Contribution to sentiment [P161, nrc]",
        y = NULL)) +
   theme_minimal() +
   theme(
@@ -244,7 +262,7 @@ tidy_text %>%
   ggplot(aes(n, word, fill = sentiment)) +
   geom_col(show.legend = FALSE) +
   facet_wrap(~sentiment, scales = "free_y") +
-  labs(x = "Contribution to sentiment",
+  labs(x = "Contribution to sentiment [P161, bing]",
        y = NULL) +
   theme_minimal() +
   theme(
@@ -530,7 +548,7 @@ text_bigrams %>%
 # Latent Dirichlet allocation (LDA) is a way of doing ^^.
 
 (Transcript_lda <- LDA(Transcript_dtm, 
-                       k = 2,
+                       k = 3,
                        # The number of 'topics' you want to model
                        control = list(seed = 123456)))
 (LDA_topics <- tidy(Transcript_lda, matrix = "beta"))
@@ -557,13 +575,13 @@ top_terms %>%
   mutate(log_ratio = log2(topic2 / topic1)))
 
 # limit to 10 largest and smallest log ratios
-beta_wide <- bind_rows(
+(beta_wide <- bind_rows(
   beta_wide %>% 
     slice_min(log_ratio, n = 10) %>%
     mutate(topic = "topic1"),
   beta_wide %>%
     slice_max(log_ratio, n = 10) %>%
-    mutate(topic = "topic2"))
+    mutate(topic = "topic2")))
 
 ggplot(beta_wide, aes(x = log_ratio, y = term))+
   geom_col()+
@@ -628,8 +646,8 @@ transcripts
 transcripts <- transcripts %>%
   mutate(participant_id = tools::file_path_sans_ext(basename(doc_id)),
          group = case_when(
-           as.numeric(gsub("[^0-9]", "", participant_id)) < 95 ~ "suicidal",
-           as.numeric(gsub("[^0-9]", "", participant_id)) >= 95 ~ "not_suicidal",
+           grepl("_S$", participant_id) ~ "suicidal",
+           grepl("_NS$", participant_id) ~ "not_suicidal",
            TRUE ~ NA_character_
          ))
 
@@ -652,22 +670,42 @@ tidy_transcripts <- transcripts %>%
 
 word_pairs %>% filter(item1 == "future")
 
-# Sentiment
-# bing
+# Sentiment analysis with different lexicons
 (bing_sentiments <- tidy_transcripts %>%
   inner_join(get_sentiments("bing"), by = "word") %>%
   count(group, sentiment) %>%
   spread(sentiment, n, fill = 0) %>%
   mutate(sentiment = positive - negative))
-# Don't forget that this will change based on how *many* people are in each group! e.g., I currently have 2 non-suicidal and 7 suicidal, so since sentiment is based on counts, it will be skewed. 
 
-# bing word counts
-bing_word_counts <- tidy_transcripts %>%
+(nrc_word_counts <- tidy_transcripts %>%
+  inner_join(get_sentiments("nrc"), by = "word") %>%
+  count(group, word, sentiment, sort = TRUE) %>%
+  ungroup())
+
+(afinn_word_counts <- tidy_transcripts %>%
+  inner_join(get_sentiments("afinn"), by = "word") %>%
+  count(group, word, value, sort = TRUE) %>%
+  ungroup())
+
+# Word counts with different lexicons
+(bing_word_counts <- tidy_transcripts %>%
   inner_join(get_sentiments("bing"), by = "word") %>%
   count(group, word, sentiment, sort = TRUE) %>%
-  ungroup()
+  ungroup())
 
-# Bing plot
+print(bing_word_counts, n = 20)
+
+(nrc_word_counts <- tidy_transcripts %>%
+  inner_join(get_sentiments("nrc"), by = "word") %>%
+  count(group, word, sentiment, sort = TRUE) %>%
+  ungroup())
+
+(afinn_word_counts <- tidy_transcripts %>%
+  inner_join(get_sentiments("afinn"), by = "word") %>%
+  count(group, word, value, sort = TRUE) %>%
+  ungroup())
+
+# Visualize words and sentiment contributions
 (bing_plot <- bing_word_counts %>%
   group_by(group, sentiment) %>%
   slice_max(n, n = 10) %>%
@@ -686,13 +724,6 @@ bing_word_counts <- tidy_transcripts %>%
     plot.background = element_rect(fill = "white")
   ))
 
-# NRC word counts
-nrc_word_counts <- tidy_transcripts %>%
-  inner_join(get_sentiments("nrc"), by = "word") %>%
-  count(group, word, sentiment, sort = TRUE) %>%
-  ungroup()
-
-# NRC plot
 (nrc_plot <- nrc_word_counts %>%
   group_by(group, sentiment) %>%
   slice_max(n, n = 10) %>%
@@ -710,12 +741,6 @@ nrc_word_counts <- tidy_transcripts %>%
     panel.background = element_rect(fill = "white"),
     plot.background = element_rect(fill = "white")
   ))
-
-# AFINN 
-afinn_word_counts <- tidy_transcripts %>%
-  inner_join(get_sentiments("afinn"), by = "word") %>%
-  count(group, word, value, sort = TRUE) %>%
-  ungroup()
 
 (afinn_plot <- afinn_word_counts %>%
   group_by(group, value) %>%
@@ -736,10 +761,28 @@ afinn_word_counts <- tidy_transcripts %>%
     panel.background = element_rect(fill = "white"),
     plot.background = element_rect(fill = "white")
   ))
-# Same disclaimer as above
 
-#### Sentiment score for each document ####
-# nrc
+# Average sentiment scores by group
+(average_sentiment_bing <- sentiment_scores_bing %>%
+  group_by(group) %>%
+  summarize(across(-participant_id, mean, na.rm = TRUE)))
+
+(average_sentiment_nrc <- sentiment_scores_nrc %>%
+  group_by(group) %>%
+  summarize(across(-participant_id, mean, na.rm = TRUE)))
+
+(average_sentiment_afinn <- sentiment_scores_afinn %>%
+  group_by(group) %>%
+  summarize(average_sentiment = mean(sentiment_score, na.rm = TRUE)))
+
+# Sentiment scores by document
+(sentiment_scores_bing <- tidy_transcripts %>%
+  inner_join(get_sentiments("bing"), by = "word") %>%
+  group_by(participant_id, group, sentiment) %>%
+  summarize(score = n()) %>%
+  ungroup() %>%
+  spread(sentiment, score, fill = 0))
+  
 (sentiment_scores_nrc <- tidy_transcripts %>%
   inner_join(get_sentiments("nrc"), by = "word") %>%
   group_by(participant_id, group, sentiment) %>%
@@ -747,61 +790,22 @@ afinn_word_counts <- tidy_transcripts %>%
   ungroup() %>%
   spread(sentiment, score, fill = 0))
 
-# bing
-(sentiment_scores_bing <- tidy_transcripts %>%
-  inner_join(get_sentiments("bing"), by = "word") %>%
-  group_by(participant_id, group, sentiment) %>%
-  summarize(score = n()) %>%
-  ungroup() %>%
-  spread(sentiment, score, fill = 0))
-
-# afinn
-sentiment_scores_afinn <- tidy_transcripts %>%
+(sentiment_scores_afinn <- tidy_transcripts %>%
   inner_join(get_sentiments("afinn"), by = "word") %>%
   group_by(group, participant_id) %>%
-  summarize(sentiment_score = sum(value, na.rm = TRUE)) %>%
+  summarize(sentiment_score = sum(value, na.rm = TRUE))) %>%
   ungroup()
 
-# nrc average sentiment scores by group 
-(average_sentiment_nrc <- sentiment_scores_nrc %>%
-  group_by(group) %>%
-  summarize(across(-participant_id, mean, na.rm = TRUE)))
-
-# bing average sentiment scores by group 
-(average_sentiment_bing <- sentiment_scores_bing %>%
-  group_by(group) %>%
-  summarize(across(-participant_id, mean, na.rm = TRUE)))
-
-# afinn average sentiment scores by group
-average_sentiment_afinn <- sentiment_scores_afinn %>%
-  group_by(group) %>%
-  summarize(average_sentiment = mean(sentiment_score, na.rm = TRUE))
-
-# reshape nrc
-average_sentiment_nrc_long <- average_sentiment_nrc %>%
-  pivot_longer(cols = -group, names_to = "sentiment", values_to = "average_score")
-
-# reshape bing
+# Reshape and plot average sentiment 
 average_sentiment_bing_long <- average_sentiment_bing %>%
   pivot_longer(cols = -group, names_to = "sentiment", values_to = "average_score")
 
-# reshape afinn
+average_sentiment_nrc_long <- average_sentiment_nrc %>%
+  pivot_longer(cols = -group, names_to = "sentiment", values_to = "average_score")
+
 average_sentiment_afinn_long <- average_sentiment_afinn %>%
   pivot_longer(cols = -group, names_to = "sentiment", values_to = "average_score")
 
-# Visualize nrc average
-(average_nrc <- ggplot(average_sentiment_nrc_long, aes(x = sentiment, y = average_score, fill = group)) +
-  geom_col(position = "dodge") +
-  labs(x = "Sentiment", y = "Average Score", title = "Average sentiment by group - NRC") +
-  theme_minimal() +
-  theme(
-    panel.grid.major = element_line(color = "grey"),
-    panel.grid.minor = element_line(color = "grey"),
-    panel.background = element_rect(fill = "white"),
-    plot.background = element_rect(fill = "white")
-  ))
-
-# Visualize bing average
 (average_bing <- ggplot(average_sentiment_bing_long, aes(x = sentiment, y = average_score, fill = group)) +
   geom_col(position = "dodge") +
   labs(x = "Sentiment", y = "Average Score", title = "Average sentiment by group - bing") +
@@ -813,7 +817,17 @@ average_sentiment_afinn_long <- average_sentiment_afinn %>%
     plot.background = element_rect(fill = "white")
   ))
 
-# Visualize afinn average
+(average_nrc <- ggplot(average_sentiment_nrc_long, aes(x = sentiment, y = average_score, fill = group)) +
+  geom_col(position = "dodge") +
+  labs(x = "Sentiment", y = "Average Score", title = "Average sentiment by group - NRC") +
+  theme_minimal() +
+  theme(
+    panel.grid.major = element_line(color = "grey"),
+    panel.grid.minor = element_line(color = "grey"),
+    panel.background = element_rect(fill = "white"),
+    plot.background = element_rect(fill = "white")
+  ))
+
 (average_afinn <- ggplot(average_sentiment_afinn_long, aes(x = sentiment, y = average_score, fill = group)) +
   geom_col(position = "dodge") +
   labs(x = "Sentiment", y = "Average Score", title = "Average sentiment by group - AFINN") +
@@ -825,8 +839,36 @@ average_sentiment_afinn_long <- average_sentiment_afinn %>%
     plot.background = element_rect(fill = "white")
   ))
 
-# visualize distribution of scores
-# afinn
+# Visualize sentiment distribution
+sentiment_scores_bing_long <- sentiment_scores_bing %>%
+  pivot_longer(cols = c("negative", "positive"), names_to = "sentiment", values_to = "score")
+
+ggplot(sentiment_scores_bing_long, aes(x = score, fill = group)) +
+  geom_density(alpha = 0.6) +
+  facet_wrap(~ sentiment, scales = "free") +
+  labs(x = "Sentiment Score", y = "Density", title = "Sentiment Score Distribution by Group (Bing)") +
+  theme_minimal() +
+  theme(
+    panel.grid.major = element_line(color = "grey"),
+    panel.grid.minor = element_line(color = "grey"),
+    panel.background = element_rect(fill = "white"),
+    plot.background = element_rect(fill = "white"))
+
+sentiment_scores_nrc_long <- sentiment_scores_nrc %>%
+  pivot_longer(cols = -c(participant_id, group), names_to = "sentiment", values_to = "score")
+
+ggplot(sentiment_scores_nrc_long, aes(x = score, fill = group)) +
+  geom_density(alpha = 0.6) +
+  facet_wrap(~ sentiment, scales = "free") +
+  labs(x = "Sentiment Score", y = "Density", title = "Sentiment Score Distribution by Group (NRC)") +
+  theme_minimal() +
+  theme(
+    panel.grid.major = element_line(color = "grey"),
+    panel.grid.minor = element_line(color = "grey"),
+    panel.background = element_rect(fill = "white"),
+    plot.background = element_rect(fill = "white")
+  )
+
 ggplot(sentiment_scores_afinn, aes(x = sentiment_score, fill = group)) +
   geom_density(alpha = 0.6) +
   labs(x = "Sentiment Score", y = "Density", title = "Sentiment Score Distribution by Group (AFINN)") +
@@ -850,6 +892,295 @@ average_afinn
 average_nrc
 average_bing
 dev.off()
+```
+
+```{r Normalized group sentiment}
+# Normalize sentiment scores for Bing
+(sentiment_scores_bing <- tidy_transcripts %>%
+  inner_join(get_sentiments("bing"), by = "word") %>%
+  count(participant_id, group, sentiment) %>%
+  spread(sentiment, n, fill = 0) %>%
+  ungroup() %>%
+  group_by(participant_id, group) %>%
+  mutate(total_words = sum(positive + negative),  # Total words calculation
+         normalized_negative = negative / total_words,
+         normalized_positive = positive / total_words) %>%
+  select(-total_words))
+
+# Normalize sentiment scores for NRC
+(sentiment_scores_nrc <- tidy_transcripts %>%
+  inner_join(get_sentiments("nrc"), by = "word") %>%
+  count(participant_id, group, sentiment) %>%
+  spread(sentiment, n, fill = 0) %>%
+  ungroup() %>%
+  group_by(participant_id, group) %>%
+  mutate(total_words = rowSums(across(starts_with("anger"):starts_with("trust"))), 
+         across(starts_with("anger"):starts_with("trust"), ~ . / total_words, .names = "normalized_{.col}")) %>%
+  select(-total_words))
+
+# Normalize sentiment scores for AFINN
+(sentiment_scores_afinn <- tidy_transcripts %>%
+  inner_join(get_sentiments("afinn"), by = "word") %>%
+  group_by(participant_id, group) %>%
+  summarize(sentiment_score = sum(value, na.rm = TRUE), .groups = 'drop') %>%
+  group_by(group) %>%
+  mutate(total_words = n(), 
+         normalized_sentiment_score = sentiment_score / total_words))
+
+# Visualize words and sentiment contributions
+(bing_plot <- bing_word_counts %>%
+  group_by(group, sentiment) %>%
+  slice_max(n, n = 10) %>%
+  ungroup() %>%
+  mutate(word = reorder_within(word, n, group)) %>%
+  ggplot(aes(n, word, fill = sentiment)) +
+  geom_col(show.legend = FALSE) +
+  facet_wrap(~ group + sentiment, scales = "free_y") +
+  labs(x = "Contribution to sentiment", y = NULL, title = "Top words contributing to normalized sentiment by group (S/NS) - Bing") +
+  scale_y_reordered() +
+  theme_minimal() +
+  theme(
+    panel.grid.major = element_line(color = "grey"),
+    panel.grid.minor = element_line(color = "grey"),
+    panel.background = element_rect(fill = "white"),
+    plot.background = element_rect(fill = "white")
+  ))
+
+(nrc_plot <- nrc_word_counts %>%
+  group_by(group, sentiment) %>%
+  slice_max(n, n = 10) %>%
+  ungroup() %>%
+  mutate(word = reorder_within(word, n, group)) %>%
+  ggplot(aes(n, word, fill = sentiment)) +
+  geom_col(show.legend = FALSE) +
+  facet_wrap(~ group + sentiment, scales = "free_y") +
+  labs(x = "Contribution to sentiment", y = NULL, title = "Top words contributing to normalized sentiment by group (S/NS) - NRC") +
+  scale_y_reordered() +
+  theme_minimal() +
+  theme(
+    panel.grid.major = element_line(color = "grey"),
+    panel.grid.minor = element_line(color = "grey"),
+    panel.background = element_rect(fill = "white"),
+    plot.background = element_rect(fill = "white")
+  ))
+
+(afinn_plot <- afinn_word_counts %>%
+  group_by(group, value) %>%
+  slice_max(n, n = 10) %>%
+  ungroup() %>%
+  mutate(word = reorder_within(word, n, group)) %>%
+  ggplot(aes(n, word, fill = factor(value))) +
+  geom_col(show.legend = FALSE) +
+  facet_wrap(~ group + value, scales = "free_y") +
+  labs(x = "Contribution to sentiment",
+       y = NULL,
+       title = "Top words contributing to  sentiment by group (S/NS) - AFINN") +
+  scale_y_reordered() +
+  theme_minimal() +
+  theme(
+    panel.grid.major = element_line(color = "grey"),
+    panel.grid.minor = element_line(color = "grey"),
+    panel.background = element_rect(fill = "white"),
+    plot.background = element_rect(fill = "white")
+  ))
+
+# Average sentiment scores by group
+(average_sentiment_bing <- sentiment_scores_bing %>%
+  group_by(group) %>%
+  summarize(across(c(normalized_negative, normalized_positive), mean, na.rm = TRUE)))
+
+(average_sentiment_nrc <- sentiment_scores_nrc %>%
+  group_by(group) %>%
+  summarize(across(starts_with("normalized_"), mean, na.rm = TRUE)))
+
+(average_sentiment_afinn <- sentiment_scores_afinn %>%
+  group_by(group) %>%
+  summarize(average_sentiment = mean(normalized_sentiment_score, na.rm = TRUE)))
+
+# Reshape and plot average sentiment 
+average_sentiment_bing_long <- average_sentiment_bing %>%
+  pivot_longer(cols = -group, names_to = "sentiment", values_to = "average_score")
+
+average_sentiment_nrc_long <- average_sentiment_nrc %>%
+  pivot_longer(cols = -group, names_to = "sentiment", values_to = "average_score")
+
+average_sentiment_afinn_long <- average_sentiment_afinn %>%
+  pivot_longer(cols = -group, names_to = "sentiment", values_to = "average_score")
+
+(average_bing <- ggplot(average_sentiment_bing_long, aes(x = sentiment, y = average_score, fill = group)) +
+  geom_col(position = "dodge") +
+  labs(x = "Sentiment", y = "Average Score", title = "Average normalized sentiment by group - bing") +
+  theme_minimal() +
+  theme(
+    panel.grid.major = element_line(color = "grey"),
+    panel.grid.minor = element_line(color = "grey"),
+    panel.background = element_rect(fill = "white"),
+    plot.background = element_rect(fill = "white")
+  ))
+
+(average_nrc <- ggplot(average_sentiment_nrc_long, aes(x = sentiment, y = average_score, fill = group)) +
+  geom_col(position = "dodge") +
+  labs(x = "Sentiment", y = "Average Score", title = "Average normalized sentiment by group - NRC") +
+  theme_minimal() +
+  theme(
+    panel.grid.major = element_line(color = "grey"),
+    panel.grid.minor = element_line(color = "grey"),
+    panel.background = element_rect(fill = "white"),
+    plot.background = element_rect(fill = "white")
+  ))
+
+(average_afinn <- ggplot(average_sentiment_afinn_long, aes(x = sentiment, y = average_score, fill = group)) +
+  geom_col(position = "dodge") +
+  labs(x = "Sentiment", y = "Average Score", title = "Average normalized sentiment by group - AFINN") +
+  theme_minimal() +
+  theme(
+    panel.grid.major = element_line(color = "grey"),
+    panel.grid.minor = element_line(color = "grey"),
+    panel.background = element_rect(fill = "white"),
+    plot.background = element_rect(fill = "white")
+  ))
+
+# Visualize sentiment distribution
+sentiment_scores_bing_long <- sentiment_scores_bing %>%
+  pivot_longer(cols = c("normalized_negative", "normalized_positive"), names_to = "sentiment", values_to = "score")
+
+ggplot(sentiment_scores_bing_long, aes(x = score, fill = group)) +
+  geom_density(alpha = 0.6) +
+  facet_wrap(~ sentiment, scales = "free") +
+  labs(x = "Sentiment Score", y = "Density", title = "Normalized sentiment Score Distribution by Group (Bing)") +
+  theme_minimal() +
+  theme(
+    panel.grid.major = element_line(color = "grey"),
+    panel.grid.minor = element_line(color = "grey"),
+    panel.background = element_rect(fill = "white"),
+    plot.background = element_rect(fill = "white"))
+
+sentiment_scores_nrc_long <- sentiment_scores_nrc %>%
+  pivot_longer(cols = -c(participant_id, group), names_to = "sentiment", values_to = "score")
+
+ggplot(sentiment_scores_nrc_long, aes(x = score, fill = group)) +
+  geom_density(alpha = 0.6) +
+  facet_wrap(~ sentiment, scales = "free") +
+  labs(x = "Sentiment Score", y = "Density", title = "Normalized sentiment Score Distribution by Group (NRC)") +
+  theme_minimal() +
+  theme(
+    panel.grid.major = element_line(color = "grey"),
+    panel.grid.minor = element_line(color = "grey"),
+    panel.background = element_rect(fill = "white"),
+    plot.background = element_rect(fill = "white")
+  )
+
+ggplot(sentiment_scores_afinn, aes(x = normalized_sentiment_score, fill = group)) +
+  geom_density(alpha = 0.6) +
+  labs(x = "Sentiment Score", y = "Density", title = "Normalized sentiment Score Distribution by Group (AFINN)") +
+  theme_minimal() +
+  theme(
+    panel.grid.major = element_line(color = "grey"),
+    panel.grid.minor = element_line(color = "grey"),
+    panel.background = element_rect(fill = "white"),
+    plot.background = element_rect(fill = "white")
+  )
+```
+
+```{r Group sentiment comparisons}
+sentiment_scores_bing %>%
+  group_by(group) %>%
+  summarize(mean_positive = mean(normalized_positive, na.rm = TRUE),
+            sd_positive = sd(normalized_positive, na.rm = TRUE),
+            mean_negative = mean(normalized_negative, na.rm = TRUE),
+            sd_negative = sd(normalized_negative, na.rm = TRUE))
+
+t.test(normalized_positive ~ group, data = sentiment_scores_bing)
+t.test(normalized_negative ~ group, data = sentiment_scores_bing)
+
+(kruskal_test_results <- kruskal.test(normalized_positive ~ group, data = sentiment_scores_bing))
+
+# AFINN
+sentiment_scores_afinn2 <- sentiment_scores_afinn %>%
+  group_by(group) %>%
+  mutate(
+    max_score = max(sentiment_score, na.rm = TRUE),
+    normalized_sentiment_score = sentiment_score / max_score
+  ) %>%
+  ungroup() %>%
+  select(-max_score)
+
+(t_test_afinn <- t.test(normalized_sentiment_score ~ group, data = sentiment_scores_afinn2))
+(t_test_afinn <- t.test(sentiment_score ~ group, data = sentiment_scores_afinn))
+
+# nrc
+(t_test_anger <- t.test(anger ~ group, data = sentiment_scores_nrc))
+(t_test_joy <- t.test(joy ~ group, data = sentiment_scores_nrc))
+```
+
+```{r Group LDA}
+word_counts <- tidy_transcripts %>%
+  count(group, participant_id, word, sort = TRUE)
+
+# Create a list of DTMs for each group
+dtms_by_group <- split(word_counts, word_counts$group) %>%
+  lapply(function(df) {
+    df %>%
+      cast_dtm(document = participant_id, term = word, value = n)
+  })
+
+# Split data by group
+split_data <- split(word_counts, word_counts$group)
+
+# Function to fit LDA model to a DTM
+fit_lda <- function(dtm) {
+  LDA(dtm, k = 2, control = list(seed = 123456))
+}
+
+# Fit LDA models for each group
+lda_models_by_group <- lapply(dtms_by_group, fit_lda)
+
+# Extract topics from each LDA model
+lda_topics_by_group <- lapply(lda_models_by_group, function(model) {
+  tidy(model, matrix = "beta")
+})
+
+# Combine topic data into a single data frame
+lda_topics_combined <- bind_rows(lapply(seq_along(lda_topics_by_group), function(i) {
+  lda_topics_by_group[[i]] %>%
+    mutate(group = names(lda_models_by_group)[i])
+}), .id = "group")
+
+top_terms <- lda_topics_combined %>%
+  group_by(group, topic) %>%
+  slice_max(beta, n = 10) %>% 
+  ungroup() %>%
+  arrange(group, topic, -beta)
+
+ggplot(top_terms, aes(beta, reorder_within(term, beta, topic), fill = factor(topic))) +
+  geom_col(show.legend = FALSE) +
+  facet_wrap(~ group + topic, scales = "free_y") +
+  scale_y_reordered() +
+  labs(x = "Beta", y = "Term", title = "Top Terms by Topic and Group") +
+  theme_minimal()
+
+```
+
+```{r Latent semantic analysis}
+
+suicidal_transcripts <- transcripts %>%
+  filter(group == "suicidal")
+
+# Create a corpus from the text data
+corpus <- Corpus(VectorSource(suicidal_transcripts$text))
+
+# Preprocess the corpus 
+corpus <- tm_map(corpus, removeWords, stopwords("en")) # Remove stopwords
+
+# Create a Document-Term Matrix
+dtm <- DocumentTermMatrix(corpus)
+dtm_matrix <- as.matrix(dtm)
+
+# Apply LSA
+lsa(dtm_matrix, dims = dimcalc_share())
+
+# Calculate cosine similarity
+cosine(dtm_matrix, y = NULL)
 ```
 
 ```{r group bigrams}
